@@ -1,28 +1,22 @@
 # Code / Meter 代码计量台初版
 
-版本：0.1.0。交付日期：2026 年 10 月 14 日。
+版本：0.1.0。初版交付日期：2026 年 10 月 14 日。结构说明更新：2026 年 10 月 20 日。
 
 ## 快速运行
 
-推荐 Node.js 24.21.0、pnpm 12.11.2。源码包是独立 Vue 应用，解压后进入 code-meter-web 目录执行：
+当前应用位于 school-web 工作区。推荐 Node.js 24.21.0、pnpm 12.11.2。在仓库根目录执行：
 
 ~~~powershell
+Set-Location D:\Projects\school-web
 pnpm install --frozen-lockfile
-pnpm run dev --port 5173 --strictPort
+pnpm --filter code-meter-web dev --port 5173 --strictPort
 ~~~
 
 打开终端显示的本地地址。停止服务器按 Ctrl+C。首次安装需要下载依赖；安装失败时先查看网络错误，不要删除源代码。若 pnpm 提示原生依赖构建未获批准，核对对应依赖后按其提示批准所需构建。
 
-## 接入已有 school-web 仓库
+## 开发约定
 
-1. 停止代码统计应用的开发服务器。
-2. 备份当前 apps/code-meter-web 目录。
-3. 将压缩包中 code-meter-web 的内容复制到 D:\Projects\school-web\apps\code-meter-web，覆盖同名源码和应用配置。
-4. 不覆盖 school-web 根目录、其他应用或 .git。独立源码包中的 pnpm-lock.yaml 用于单独运行；接入 workspace 时继续使用根目录锁文件，不必复制这一个应用级锁文件。
-5. 在 school-web 根目录执行 pnpm install，再运行 pnpm --filter code-meter-web run dev --port 5173 --strictPort。
-6. 检查 git diff 后，在功能分支提交修改，不要把 node_modules、.cache 或 dist 提交。
-
-本次 D 盘自动同步遇到权限刷新故障，仓库可能保留较早版本。完整修复版本以交付压缩包为准，请先覆盖再使用。
+每轮修改前先阅读仓库根目录的 AGENTS.md 和 docs/PROJECT.md，完成阶段后更新进度。当前仓库直接维护源码，使用根目录的 pnpm-lock.yaml；不要拿历史交付包覆盖当前开发内容。node_modules、.cache 和 dist 不提交。
 
 ## 功能
 
@@ -30,11 +24,11 @@ pnpm run dev --port 5173 --strictPort
 - C、C++、Python 的有效代码行、纯注释行、空行及混合行统计。
 - 项目汇总、语言饼图及文件明细；未知语言和失败文件单列原因。
 - 真实扫描快照、活动方块、7/30/365 天与自定义范围、兼容快照净变化。
-- 黑白界面及青绿/蓝色活动方块主题，顶部缓慢移动的文字条。
+- 原色与暗色主题，顶部缓慢移动的文字条；其他配色方案已舍弃。
 - JSON 与 CSV 导出、历史查看与删除。
 - 文件表先显示 50 行，按需继续显示，避免一次渲染大量文件。
 
-没有账号和后端，不执行源代码，不上传或持久保存代码正文。每次统计需要用户重新选择文件或粘贴文本。历史仅保存元数据和统计结果。
+没有账号和后端，不执行源代码，不上传或持久保存代码正文。输入在本次页面会话中保留，可以重复统计；刷新后需要重新选择文件或粘贴文本。历史仅保存元数据和统计结果。
 
 ## 统计定义
 
@@ -53,10 +47,22 @@ pnpm run dev --port 5173 --strictPort
 - src/platform/scanner.ts 与 src/workers/scan.worker.ts：后台任务及取消。
 - src/platform/storage.ts：IndexedDB、CSV、JSON 和下载。
 - src/components/LanguagePie.vue、ActivityGrid.vue：图表组件。
-- src/App.vue：页面与交互协调。
+- src/components/ProjectToolbar.vue：项目选择、新建与时间筛选，通过模型和事件与入口通信。
+- src/pages/WorkspacePage.vue：文件／文本输入、总览、图表、明细筛选与报表导出。
+- src/pages/HistoryPage.vue：展示历史，通过事件请求查看或删除快照。
+- src/pages/RulesPage.vue：现有统计规则说明；未来介绍页内容仍待讨论。
+- src/composables/useScan.ts：输入状态、读取和扫描调度、取消、当前结果与错误状态。
+- src/composables/useHistory.ts：快照读取／保存／删除、时间范围、活动聚合与日期刷新。
+- src/composables/useProjects.ts、useTheme.ts：项目和主题的本地设置。
+- src/utils/format.ts：时间与错误提示的格式化。
+- src/App.vue：页面导航、共享状态和模块间协调。
 - src/assets/meter.css：主题、排版、响应布局与减少动态效果设置。
 
 核心不依赖 Vue、DOM、文件系统或数据库。分析器通过公开 registerAnalyzer 接口扩展。初版使用应用内独立目录，后续可以抽取成 packages/code-core，调用接口保持不变。
+
+扫描和历史状态在应用层创建，不随页面切换销毁。工作台保持挂载，保留输入与明细筛选；规则和历史页面按需显示。应用卸载时取消分析线程并清理日期定时器和事件监听。新增页面内容放在 pages，流程放在 composables，文件和数据库操作继续放在 platform；只有确认有跨应用复用需求时再抽共享包。
+
+本轮未调整统计算法、快照字段或浏览器数据库版本，已有历史继续沿用。
 
 ## 数据保存
 
@@ -67,12 +73,12 @@ pnpm run dev --port 5173 --strictPort
 ## 检查命令
 
 ~~~powershell
-pnpm run type-check
-pnpm run test:unit --run
-pnpm run build
+pnpm --filter code-meter-web type-check
+pnpm --filter code-meter-web test:unit --run
+pnpm --filter code-meter-web build
 ~~~
 
-构建输出在 dist。可以执行 pnpm run preview 查看生产构建。本次验证使用已有依赖，尚未在完全空白机器上重新下载安装。
+以上命令在仓库根目录运行。构建输出在 apps/code-meter-web/dist，可以执行 pnpm --filter code-meter-web preview 查看生产构建。验证使用已有依赖，尚未在完全空白机器上重新下载安装。实际验证结果见 QUALITY.md。
 
 ## 输入约束和边界
 
