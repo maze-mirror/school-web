@@ -1,21 +1,32 @@
 <script setup lang="ts">
 import { computed, ref, toRefs, watch } from 'vue'
 import { LANGUAGES, emptyCounts, localDateKey, type Snapshot } from '@/core'
+import { dailyComposition } from '@/core/composition'
 import { filePath } from '@/platform/files'
-import { downloadFile, snapshotCsv } from '@/platform/storage'
+import { downloadFile, snapshotCsv, snapshotJson, snapshotXlsx } from '@/platform/storage'
 import type { ScanState } from '@/composables/useScan'
 import type { HistoryState } from '@/composables/useHistory'
-import { formatTime } from '@/utils/format'
+import { formatTime, errorText } from '@/utils/format'
 import MeterSelect from '@/components/MeterSelect.vue'
 import LanguagePie from '@/components/LanguagePie.vue'
 import ActivityGrid from '@/components/ActivityGrid.vue'
+import ReportSummary from '@/components/ReportSummary.vue'
 const props = defineProps<{
   scan: ScanState
   display: Snapshot | null
   days: HistoryState['days']
+  history: Snapshot[]
   comparison: { value: number | null; reason: string } | undefined
   projectId: string
 }>()
+const emit = defineEmits<{ explainActivity: [] }>()
+const selectedDate = ref('')
+const composition = computed(() =>
+  selectedDate.value ? dailyComposition(props.history, selectedDate.value) : null,
+)
+watch([() => props.projectId, () => props.days[0]?.date, () => props.days.at(-1)?.date], () => {
+  selectedDate.value = ''
+})
 const {
   mode,
   selectedFiles,
@@ -79,15 +90,29 @@ function clearText() {
   props.scan.clearText()
   textInput.value?.focus()
 }
-function exportResult(kind: 'json' | 'csv') {
+const exporting = ref(false)
+const exportError = ref('')
+async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
   const s = display.value
-  if (!s) return
+  if (!s || exporting.value) return
   const name = `code-meter-${localDateKey(new Date(s.scannedAt))}`
-  downloadFile(
-    `${name}.${kind}`,
-    kind === 'json' ? JSON.stringify({ schemaVersion: 1, snapshot: s }, null, 2) : snapshotCsv(s),
-    kind === 'json' ? 'application/json;charset=utf-8' : 'text/csv;charset=utf-8',
-  )
+  exporting.value = true
+  exportError.value = ''
+  try {
+    const content =
+      kind === 'xlsx' ? await snapshotXlsx(s) : kind === 'json' ? snapshotJson(s) : snapshotCsv(s)
+    const mime =
+      kind === 'xlsx'
+        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        : kind === 'json'
+          ? 'application/json;charset=utf-8'
+          : 'text/csv;charset=utf-8'
+    downloadFile(`${name}.${kind}`, content, mime)
+  } catch (error) {
+    exportError.value = '导出失败：' + errorText(error)
+  } finally {
+    exporting.value = false
+  }
 }
 </script>
 <template>
@@ -96,8 +121,7 @@ function exportResult(kind: 'json' | 'csv') {
       <div class="input-panel">
         <div class="section-heading">
           <div>
-            <span class="section-index">01 / INPUT</span>
-            <h2>从一份代码开始</h2>
+            <h2 class="section-index">01 / INPUT</h2>
           </div>
           <div class="segmented" aria-label="输入方式">
             <button :aria-pressed="mode === 'files'" :disabled="busy" @click="mode = 'files'">
@@ -222,8 +246,7 @@ function exportResult(kind: 'json' | 'csv') {
       <div class="overview-panel">
         <div class="section-heading">
           <div>
-            <span class="section-index">02 / OVERVIEW</span>
-            <h2>看见代码的轮廓</h2>
+            <h2 class="section-index">02 / OVERVIEW</h2>
           </div>
           <span class="status-dot">{{ display ? 'SNAPSHOT' : 'READY' }}</span>
         </div>
@@ -248,30 +271,44 @@ function exportResult(kind: 'json' | 'csv') {
           <span>{{ display ? formatTime(display.scannedAt) : '等待第一次统计' }}</span
           ><span>{{ display ? saveState || '历史快照' : '文件 / 文本 → 统计 → 快照' }}</span>
         </div>
-        <p class="overview-note">
-          总物理行 = 空行 + 纯注释行 + 有效代码行。<br />混合行属于代码行；行数描述规模，不代表质量或工作量。
-        </p>
+        <p class="overview-note">总物理行 = 空行 + 纯注释行 + 有效代码行。</p>
       </div>
     </section>
     <section class="charts-grid">
       <div class="chart-panel">
         <div class="section-heading">
           <div>
-            <span class="section-index">03 / COMPOSITION</span>
-            <h2>语言构成</h2>
+            <h2 class="section-index">03 / COMPOSITION</h2>
           </div>
           <span class="muted">有效代码行占比</span>
         </div>
-        <LanguagePie :languages="display?.languages ?? []" :total="counts.code" />
+        <div class="composition-context">
+          <span>{{
+            selectedDate
+              ? `${selectedDate} · 当天累计 · ${composition?.scans ?? 0} 次扫描`
+              : '当前快照'
+          }}</span>
+          <button v-if="selectedDate" class="text-button" @click="selectedDate = ''">
+            返回当前快照
+          </button>
+        </div>
+        <LanguagePie
+          :languages="composition?.languages ?? display?.languages ?? []"
+          :total="composition?.code ?? counts.code"
+          :cumulative="!!selectedDate"
+        />
       </div>
       <div class="chart-panel">
         <div class="section-heading">
           <div>
-            <span class="section-index">04 / ACTIVITY</span>
-            <h2>扫描留下的方块</h2>
+            <h2 class="section-index">04 / ACTIVITY</h2>
           </div>
         </div>
-        <ActivityGrid :days="days" />
+        <ActivityGrid
+          :days="days"
+          v-model:selected-date="selectedDate"
+          @explain="emit('explainActivity')"
+        />
         <div class="change-note">
           <span>区间净变化</span
           ><strong>{{
@@ -286,17 +323,32 @@ function exportResult(kind: 'json' | 'csv') {
     <section class="files-section">
       <div class="section-heading">
         <div>
-          <span class="section-index">05 / FILES</span>
-          <h2>每一份文件，清清楚楚</h2>
+          <h2 class="section-index">05 / FILES</h2>
         </div>
         <div class="export-actions">
-          <button class="secondary-button" :disabled="!display" @click="exportResult('csv')">
+          <button
+            class="secondary-button"
+            :disabled="!display || exporting"
+            @click="exportResult('csv')"
+          >
             导出 CSV ↗</button
-          ><button class="secondary-button" :disabled="!display" @click="exportResult('json')">
-            导出 JSON ↗
+          ><button
+            class="secondary-button"
+            :disabled="!display || exporting"
+            @click="exportResult('json')"
+          >
+            导出 JSON ↗</button
+          ><button
+            class="secondary-button"
+            :disabled="!display || exporting"
+            @click="exportResult('xlsx')"
+          >
+            {{ exporting ? '正在导出…' : '导出 Excel ↗' }}
           </button>
         </div>
       </div>
+      <p v-if="exportError" class="notice" role="alert">{{ exportError }}</p>
+      <ReportSummary :snapshot="display" />
       <div class="table-controls">
         <label class="sr-only" for="file-search">搜索文件路径</label
         ><input id="file-search" v-model="search" placeholder="搜索文件路径…" /><label
@@ -324,6 +376,7 @@ function exportResult(kind: 'json' | 'csv') {
               <th>注释</th>
               <th>空行</th>
               <th>总行</th>
+              <th>函数</th>
               <th>状态 / 说明</th>
             </tr>
           </thead>
@@ -335,6 +388,7 @@ function exportResult(kind: 'json' | 'csv') {
               <td>{{ f.status === 'ok' ? f.counts.commentOnly : '—' }}</td>
               <td>{{ f.status === 'ok' ? f.counts.blank : '—' }}</td>
               <td>{{ f.status === 'ok' ? f.counts.total : '—' }}</td>
+              <td>{{ f.status === 'ok' ? (f.functionCount ?? '—') : '—' }}</td>
               <td class="file-note">
                 <span>{{
                   f.status === 'ok' ? '完成' : f.status === 'skipped' ? '跳过' : '失败'
@@ -343,7 +397,7 @@ function exportResult(kind: 'json' | 'csv') {
               </td>
             </tr>
             <tr v-if="!fileRows.length">
-              <td colspan="7" class="table-empty">
+              <td colspan="8" class="table-empty">
                 {{
                   display ? '没有符合筛选条件的文件。' : '选择文件或粘贴代码，结果会出现在这里。'
                 }}

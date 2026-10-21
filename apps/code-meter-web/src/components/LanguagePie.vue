@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { LanguageStat } from '@/core'
-const props = defineProps<{ languages: LanguageStat[]; total: number }>()
+const props = defineProps<{ languages: LanguageStat[]; total: number; cumulative?: boolean }>()
 const colors = ['var(--ink)', 'var(--pie-2)', 'var(--pie-3)', 'var(--pie-4)']
 const gradient = computed(() => {
   if (!props.total) return 'var(--surface)'
@@ -35,7 +35,8 @@ const gradient = computed(() => {
       <li v-for="(language, i) in languages" :key="language.language">
         <span class="swatch" :style="{ background: colors[i % colors.length] }"></span>
         <span
-          >{{ language.name }}<small>{{ language.files }} 个文件</small></span
+          >{{ language.name
+          }}<small>{{ language.files }} {{ cumulative ? '文件次' : '个文件' }}</small></span
         >
         <span class="language-numbers"
           ><strong>{{ language.counts.code.toLocaleString() }}</strong
@@ -45,6 +46,10 @@ const gradient = computed(() => {
         >
       </li>
     </ul>
-    <p v-else class="muted">还没有语言数据。<br />完成一次统计后查看分布。</p>
+    <p v-else class="muted">
+      {{ cumulative ? '当天没有已保存的扫描。' : '还没有语言数据。' }}<br />{{
+        cumulative ? '可选择其他日期或返回当前快照。' : '完成一次统计后查看分布。'
+      }}
+    </p>
   </div>
 </template>

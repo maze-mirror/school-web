@@ -19,7 +19,7 @@ export function useProjects(notice: Ref<string>) {
   function addProject() {
     const name = newProjectName.value.trim()
     if (!name) {
-      notice.value = '请输入项目名称'
+      notice.value = '请输入统计档案名称'
       return false
     }
     const p = { id: crypto.randomUUID(), name }
@@ -28,7 +28,7 @@ export function useProjects(notice: Ref<string>) {
     newProjectName.value = ''
     const saved = persistProjects()
     notice.value = saved
-      ? '已建立独立项目，历史按项目分别保存。'
+      ? '已建立统计档案，扫描时请选择本地文件或文件夹。'
       : '项目设置未能保存；完成扫描后会从历史快照恢复项目，请导出备份。'
     return true
   }
