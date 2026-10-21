@@ -57,7 +57,7 @@ export async function deleteSnapshot(id: string): Promise<void> {
     db.close()
   }
 }
-export function downloadFile(name: string, content: string, mime: string) {
+export function downloadFile(name: string, content: string | ArrayBuffer, mime: string) {
   const url = URL.createObjectURL(new Blob([content], { type: mime }))
   const a = document.createElement('a')
   a.href = url
@@ -65,37 +65,4 @@ export function downloadFile(name: string, content: string, mime: string) {
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
-function csvCell(value: string | number): string {
-  let s = String(value)
-  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s
-  return '"' + s.replace(/"/g, '""') + '"'
-}
-export function snapshotCsv(snapshot: Snapshot): string {
-  const rows: (string | number)[][] = [
-    ['路径', '语言', '状态', '总行', '空行', '注释行', '代码行', '混合行', '说明'],
-  ]
-  for (const f of snapshot.files)
-    rows.push([
-      f.path,
-      f.language ?? '未知',
-      f.status,
-      f.counts.total,
-      f.counts.blank,
-      f.counts.commentOnly,
-      f.counts.code,
-      f.counts.mixed,
-      [f.reason, ...f.warnings].filter(Boolean).join('；'),
-    ])
-  rows.push([
-    '项目合计',
-    '',
-    '',
-    snapshot.totals.total,
-    snapshot.totals.blank,
-    snapshot.totals.commentOnly,
-    snapshot.totals.code,
-    snapshot.totals.mixed,
-    `规则 ${snapshot.ruleVersion}；时间 ${snapshot.scannedAt}`,
-  ])
-  return '\ufeff' + rows.map((r) => r.map(csvCell).join(',')).join('\r\n')
-}
+export { snapshotCsv, snapshotJson, snapshotXlsx } from './reports'

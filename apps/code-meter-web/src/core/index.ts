@@ -1,3 +1,4 @@
+import { countFunctions, FUNCTION_RULE_VERSION } from './functions'
 export const RULE_VERSION = 'physical-lines-1.0'
 export type Language = string
 export const LANGUAGES: { id: Language; name: string; extensions: string[] }[] = [
@@ -24,6 +25,8 @@ export interface FileStat {
   counts: Counts
   reason: string
   warnings: string[]
+  functionCount?: number | null
+  functionRuleVersion?: string
 }
 export interface LanguageStat {
   language: Language
@@ -227,7 +230,14 @@ export function analyzeText(source: Source): FileStat {
       warnings: [],
     }
   try {
-    return analyzer({ ...source, language })
+    const result = analyzer({ ...source, language })
+    if (result.status === 'ok' && ['c', 'cpp', 'python'].includes(language)) {
+      const functions = countFunctions(source.text, language)
+      result.functionCount = functions.count
+      result.functionRuleVersion = FUNCTION_RULE_VERSION
+      if (functions.warning) result.warnings.push(functions.warning)
+    }
+    return result
   } catch (e) {
     return {
       path: source.path,
@@ -285,29 +295,36 @@ export function compareSnapshots(
 export function localDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
-export function activityDays(
-  snapshots: Snapshot[],
-  start: Date,
-  end: Date,
-): { date: string; count: number; level: number }[] {
-  const counts = new Map<string, number>()
+export interface ActivityDay {
+  date: string
+  count: number
+  scannedCode: number
+  level: number
+}
+export function activityDays(snapshots: Snapshot[], start: Date, end: Date): ActivityDay[] {
+  const totals = new Map<string, { count: number; scannedCode: number }>()
   for (const s of snapshots) {
     const d = new Date(s.scannedAt)
     if (d >= start && d < end) {
       const key = localDateKey(d)
-      counts.set(key, (counts.get(key) ?? 0) + 1)
+      const day = totals.get(key) ?? { count: 0, scannedCode: 0 }
+      day.count++
+      day.scannedCode += s.totals.code
+      totals.set(key, day)
     }
   }
-  const days: { date: string; count: number; level: number }[] = []
+  const maximum = Math.max(0, ...[...totals.values()].map((day) => day.scannedCode))
+  const days: ActivityDay[] = []
   const cursor = new Date(start)
   cursor.setHours(0, 0, 0, 0)
   while (cursor < end) {
-    const date = localDateKey(cursor),
-      count = counts.get(date) ?? 0
+    const date = localDateKey(cursor)
+    const { count, scannedCode } = totals.get(date) ?? { count: 0, scannedCode: 0 }
     days.push({
       date,
       count,
-      level: count === 0 ? 0 : count === 1 ? 1 : count <= 3 ? 2 : count <= 6 ? 3 : 4,
+      scannedCode,
+      level: maximum > 0 ? Math.ceil((scannedCode / maximum) * 4) : 0,
     })
     cursor.setDate(cursor.getDate() + 1)
   }

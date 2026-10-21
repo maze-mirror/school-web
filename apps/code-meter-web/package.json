@@ -16,6 +16,9 @@
     "format": "prettier --write --experimental-cli src/"
   },
   "dependencies": {
+    "@lezer/cpp": "^1.1.6",
+    "@lezer/python": "^1.1.19",
+    "exceljs": "^4.4.0",
     "pinia": "^4.0.3",
     "vue": "^3.5.42",
     "vue-router": "^5.3.1"

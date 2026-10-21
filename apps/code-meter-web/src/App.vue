@@ -12,6 +12,11 @@ import HistoryPage from '@/pages/HistoryPage.vue'
 import RulesPage from '@/pages/RulesPage.vue'
 
 const page = ref<'workspace' | 'history' | 'rules'>('workspace')
+const introductionTarget = ref('')
+function openIntroduction(target = '') {
+  introductionTarget.value = target
+  page.value = 'rules'
+}
 const notice = ref('')
 const { projects, projectId, newProjectName, project, addProject, loadSettings, restoreProjects } =
   useProjects(notice)
@@ -83,8 +88,11 @@ onMounted(async () => {
             @click="page = 'history'"
           >
             扫描历史</button
-          ><button :aria-current="page === 'rules' ? 'page' : undefined" @click="page = 'rules'">
-            统计口径
+          ><button
+            :aria-current="page === 'rules' ? 'page' : undefined"
+            @click="openIntroduction()"
+          >
+            项目介绍
           </button>
         </nav>
         <div class="theme-select">
@@ -124,8 +132,10 @@ onMounted(async () => {
       </section>
 
       <ProjectToolbar
+        v-if="page !== 'rules'"
         :projects="projects"
         :busy="scanState.busy"
+        :allow-create="page === 'workspace'"
         v-model:project-id="projectId"
         v-model:new-project-name="newProjectName"
         v-model:period="historyState.period"
@@ -135,7 +145,7 @@ onMounted(async () => {
         @period-change="scanState.current = null"
         @add-project="createProject"
       />
-      <p v-if="!historyState.range" class="notice" role="alert">
+      <p v-if="page !== 'rules' && !historyState.range" class="notice" role="alert">
         请选择有效日期范围；自定义范围最多 366 天。
       </p>
       <div v-if="notice" class="notice" role="status">
@@ -151,8 +161,10 @@ onMounted(async () => {
         :scan="scanState"
         :display="display"
         :days="historyState.days"
+        :history="historyState.history"
         :comparison="historyState.periodData?.comparison"
         :project-id="projectId"
+        @explain-activity="openIntroduction('activity-method')"
       />
       <HistoryPage
         v-if="page === 'history'"
@@ -163,7 +175,7 @@ onMounted(async () => {
         @remove="removeSnapshot"
         @workspace="page = 'workspace'"
       />
-      <RulesPage v-if="page === 'rules'" />
+      <RulesPage v-if="page === 'rules'" :target="introductionTarget" />
       <footer>
         <span>code / meter<span class="footer-dot"> · </span>one line at a time.</span
         ><span>本地处理 · 无账号 · {{ RULE_VERSION }}</span>

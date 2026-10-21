@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Project } from '@/composables/useProjects'
 import MeterSelect from './MeterSelect.vue'
-defineProps<{ projects: Project[]; busy: boolean }>()
+defineProps<{ projects: Project[]; busy: boolean; allowCreate: boolean }>()
 const projectId = defineModel<string>('projectId', { required: true })
 const newProjectName = defineModel<string>('newProjectName', {
   required: true,
@@ -27,15 +27,18 @@ const emit = defineEmits<{
         @change="emit('projectChange')"
       />
     </div>
-    <form class="project-create" @submit.prevent="emit('addProject')">
-      <label class="sr-only" for="project-name">新项目名称</label
+    <form v-if="allowCreate" class="project-create" @submit.prevent="emit('addProject')">
+      <label class="sr-only" for="project-name">新统计档案名称</label
       ><input
         id="project-name"
         v-model="newProjectName"
-        placeholder="新项目名称"
+        placeholder="新统计档案名称"
+        title="建立统计档案，扫描时再选择本地文件或文件夹。"
         maxlength="60"
         :disabled="busy"
-      /><button class="secondary-button" :disabled="busy || !newProjectName.trim()">＋ 新建</button>
+      /><button class="secondary-button" :disabled="busy || !newProjectName.trim()">
+        ＋ 新建档案
+      </button>
     </form>
     <div class="period-select toolbar-field">
       <span>时间</span
