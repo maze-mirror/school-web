@@ -3,3 +3,6 @@ dist/
 coverage/
 .env.local
 .env.*.local
+
+# L's homepage is maintained in its own repository; portfolio-web keeps only its link.
+/apps/portfolio-web/sailing_log/
