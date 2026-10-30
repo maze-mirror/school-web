@@ -336,7 +336,6 @@ it('shows the new language summary and exports Excel from the displayed snapshot
     '代码行数',
     '空行数',
     '注释行数',
-    '函数个数',
     '最大值',
     '最小值',
     '均值',
@@ -348,7 +347,7 @@ it('shows the new language summary and exports Excel from the displayed snapshot
       .findAll('tbody tr')[0]!
       .findAll('td')
       .map((cell) => cell.text()),
-  ).toEqual(['1', '2', '0', '0', '1', '2', '2', '2', '2'])
+  ).toEqual(['1', '2', '0', '0', '2', '2', '2', '2'])
   await wrapper.get('.export-actions').findAll('button')[2]!.trigger('click')
   await flushPromises()
   expect(snapshotXlsx).toHaveBeenCalledOnce()
@@ -417,4 +416,75 @@ it('links a selected day to cumulative composition and opens its explanation fro
   await wrapper.get('[aria-controls="topics-methods"]').trigger('click')
   await wrapper.get('a[href="#language-rules"]').trigger('click')
   expect(wrapper.get('.introduction-article').text()).toContain('三引号字符串')
+})
+
+it('scans all three new text languages, retains history and exports unknown function counts', async () => {
+  await open()
+  for (const [name, language, extension, text, code] of [
+    ['Java', 'java', 'java', '/** note */\nint n = 1;', 1],
+    ['JavaScript', 'javascript', 'js', 'const s = `hello ${\n // name\n userName\n}`;', 3],
+    ['TypeScript', 'typescript', 'ts', 'interface User {\n name: string; // field\n}', 3],
+  ] as const) {
+    await enterText(text)
+    await select('代码语言', name)
+    await scan()
+    const latest = repository.snapshots[0]!
+    expect(latest.files[0]?.language).toBe(language)
+    expect(latest.files[0]?.path).toBe('snippet.' + extension)
+    expect(latest.files[0]?.functionCount).toBeNull()
+    expect(wrapper.get('.main-count strong').text()).toBe(String(code))
+    expect(wrapper.get('.language-list').text()).toContain(name)
+    expect(wrapper.get('.report-summary tbody tr').findAll('td')).toHaveLength(8)
+  }
+  // Exports are also derived from the real result, not a language-specific UI branch.
+  const jsonButton = wrapper.findAll('button').find((button) => button.text() === '导出 JSON ↗')!
+  await jsonButton.trigger('click')
+  await flushPromises()
+  const exported = JSON.parse(String(vi.mocked(downloadFile).mock.calls.at(-1)?.[1]))
+  expect(exported.snapshot.files[0].language).toBe('typescript')
+  expect(exported.snapshot.files[0].functionCount).toBeNull()
+  await navigate('扫描历史')
+  expect(wrapper.findAll('.history-row')).toHaveLength(3)
+})
+
+it('hides deferred fields and generic parser notes while preserving specific warnings and exported data', async () => {
+  const files = [
+    analyzeText({ path: 'function-only.py', text: 'def broken(:\n    pass' }),
+    analyzeText({ path: 'line-warning.py', text: 'print("unfinished' }),
+    analyzeText({ path: 'line-warning.ts', text: 'flags[line]! |= kind;' }),
+    analyzeText({ path: 'valid.py', text: 'def ok():\n    return 1' }),
+  ]
+  const snapshot = { ...oldSnapshot(), ...summarize(files), id: 'visibility' }
+  repository.snapshots = [snapshot]
+  await open()
+  expect(files[0]!.warnings.join('')).toContain('函数个数暂不可用')
+  expect(files[3]!.functionCount).toBe(1)
+  expect(wrapper.get('.workspace-page').text()).not.toContain('函数')
+  expect(wrapper.get('.report-summary thead').findAll('th')).toHaveLength(9)
+  expect(wrapper.get('.files-section > .table-scroll thead').findAll('th')).toHaveLength(7)
+  expect(wrapper.get('.table-controls').text()).toContain('仅看异常 / 跳过（1）')
+  expect(wrapper.get('.files-section').text()).toContain('字符串可能未闭合')
+  expect(files[2]!.warnings.join('')).toContain('存在未完整识别的语法或未闭合内容')
+  expect(wrapper.get('.files-section').text()).not.toContain('存在未完整识别的语法或未闭合内容')
+  await wrapper.get('.table-controls input[type="checkbox"]').setValue(true)
+  const rows = wrapper.findAll('.files-section > .table-scroll tbody tr')
+  expect(rows).toHaveLength(1)
+  expect(rows[0]!.get('.file-path').text()).toBe('line-warning.py')
+  await wrapper
+    .findAll('button')
+    .find((button) => button.text() === '导出 JSON ↗')!
+    .trigger('click')
+  await flushPromises()
+  const exported = JSON.parse(String(vi.mocked(downloadFile).mock.calls.at(-1)?.[1]))
+  expect(exported.snapshot.files[0].warnings).toEqual(files[0]!.warnings)
+  expect(exported.snapshot.files[2].warnings).toEqual(files[2]!.warnings)
+  expect(exported.snapshot.files[3].functionCount).toBe(1)
+  expect(snapshot.files[0]!.warnings).toEqual(files[0]!.warnings)
+  await navigate('项目介绍')
+  await wrapper.get('a[href="#report-output"]').trigger('click')
+  expect(wrapper.get('.introduction-article').text()).not.toContain('函数')
+  await wrapper.get('[aria-controls="topics-methods"]').trigger('click')
+  await wrapper.get('a[href="#functions-distribution"]').trigger('click')
+  expect(wrapper.get('.introduction-article h2').text()).toBe('文件行数分布')
+  expect(wrapper.get('.introduction-article').text()).not.toContain('函数')
 })

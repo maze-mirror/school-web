@@ -87,7 +87,7 @@ describe('physical-line boundaries', () => {
     expect(analyzeText({ path: 'a.py', text: '"""unfinished' }).warnings.length).toBeGreaterThan(0)
   })
   it('unknown and binary files do not fabricate counts', () => {
-    expect(analyzeText({ path: 'a.java', text: 'class A {}' }).status).toBe('skipped')
+    expect(analyzeText({ path: 'a.rs', text: 'fn main() {}' }).status).toBe('skipped')
     expect(analyzeText({ path: 'a.c', text: 'a\0b' }).status).toBe('error')
   })
   it('aggregates only successful files and preserves the partition', () => {

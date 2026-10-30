@@ -38,6 +38,35 @@ it('exports the requested summary fields, file details and metric definitions in
   expect(JSON.stringify(json)).not.toContain('return 1')
 })
 
+it('exports new languages through CSV, JSON and Excel without inventing function counts', async () => {
+  const s = sample()
+  Object.assign(
+    s,
+    summarize([
+      analyzeText({ path: 'A.java', text: 'int n = 1; // note' }),
+      analyzeText({ path: 'a.js', text: 'const n = 1;' }),
+      analyzeText({ path: 'a.ts', text: 'const n: number = 1;' }),
+    ]),
+  )
+  const json = JSON.parse(snapshotJson(s))
+  expect(json.summary.byLanguage.map((row: { language: string }) => row.language)).toEqual([
+    'Java',
+    'JavaScript',
+    'TypeScript',
+  ])
+  expect(json.summary.total.functionCount).toBeNull()
+  expect(json.snapshot.ruleVersion).toBe('physical-lines-1.1')
+  for (const name of ['Java', 'JavaScript', 'TypeScript'])
+    expect(snapshotCsv(s)).toContain('"' + name + '"')
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await snapshotXlsx(s))
+  const summary = workbook.getWorksheet('语言汇总')!
+  expect(summary.getCell('A2').value).toBe('Java')
+  expect(summary.getCell('A4').value).toBe('TypeScript')
+  expect(summary.getCell('C5').value).toBe(3)
+  expect(summary.getCell('F5').value).toBe('—')
+})
+
 it('keeps old snapshot function counts null while computing the available file statistics', () => {
   const s = sample()
   s.files.forEach((file) => {

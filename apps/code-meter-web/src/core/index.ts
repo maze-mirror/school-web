@@ -1,11 +1,16 @@
 import { countFunctions, FUNCTION_RULE_VERSION } from './functions'
-export const RULE_VERSION = 'physical-lines-1.0'
+import { analyzeModern } from './modern-languages'
+export const RULE_VERSION = 'physical-lines-1.1'
 export type Language = string
 export const LANGUAGES: { id: Language; name: string; extensions: string[] }[] = [
   { id: 'c', name: 'C', extensions: ['c', 'h'] },
   { id: 'cpp', name: 'C++', extensions: ['cpp', 'cc', 'cxx', 'hpp', 'hh', 'hxx'] },
   { id: 'python', name: 'Python', extensions: ['py', 'pyw'] },
+  { id: 'java', name: 'Java', extensions: ['java'] },
+  { id: 'javascript', name: 'JavaScript', extensions: ['js', 'mjs', 'cjs'] },
+  { id: 'typescript', name: 'TypeScript', extensions: ['ts', 'mts', 'cts'] },
 ]
+export const supportedLanguageNames = () => LANGUAGES.map((language) => language.name).join(' / ')
 export interface Counts {
   total: number
   blank: number
@@ -67,7 +72,11 @@ function analyzeBuiltin(source: Source): FileStat {
     warnings: [],
   }
   if (!language)
-    return { ...output, status: 'skipped', reason: '暂不支持此语言；首版支持 C、C++、Python。' }
+    return {
+      ...output,
+      status: 'skipped',
+      reason: '暂不支持此语言；当前支持 ' + supportedLanguageNames() + '。',
+    }
   if (source.text.includes('\0'))
     return { ...output, status: 'error', reason: '内容含二进制空字符，未按源代码统计。' }
   if (!source.text) return output
@@ -198,7 +207,12 @@ function analyzeBuiltin(source: Source): FileStat {
   return output
 }
 export type Analyzer = (source: Source) => FileStat
-const analyzers = new Map<string, Analyzer>(LANGUAGES.map((l) => [l.id, analyzeBuiltin]))
+const analyzers = new Map<string, Analyzer>(
+  LANGUAGES.map((language) => [
+    language.id,
+    ['java', 'javascript', 'typescript'].includes(language.id) ? analyzeModern : analyzeBuiltin,
+  ]),
+)
 /** Extension point: registering an analyzer leaves summary, storage and charts unchanged. */
 export function registerAnalyzer(
   definition: { id: Language; name: string; extensions: string[] },
@@ -216,7 +230,7 @@ export function analyzeText(source: Source): FileStat {
       language: null,
       status: 'skipped',
       counts: emptyCounts(),
-      reason: '暂不支持此语言；首版支持 C、C++、Python。',
+      reason: '暂不支持此语言；当前支持 ' + supportedLanguageNames() + '。',
       warnings: [],
     }
   const analyzer = analyzers.get(language)

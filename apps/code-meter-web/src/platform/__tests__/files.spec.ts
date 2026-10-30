@@ -61,3 +61,21 @@ it('quota applies after directory exclusions', async () => {
   )
   expect((await readSources([...many, good], ['node_modules'])).sources).toHaveLength(1)
 })
+
+it('reads a mixed upload with new languages and keeps unknown files explicitly skipped', async () => {
+  const input = [
+    ['A.java', 'int n = 1; // note'],
+    ['module.mjs', 'const n = 1;'],
+    ['types.d.ts', 'interface A { value: number }'],
+    ['component.vue', '<template />'],
+  ].map(([name, text]) => file(name!, new TextEncoder().encode(text!)))
+  const prepared = await readSources(input, [])
+  const result = summarize(prepared.sources.map(analyzeText))
+  expect(result.languages.map((language) => language.language)).toEqual([
+    'java',
+    'javascript',
+    'typescript',
+  ])
+  expect(result.files.at(-1)?.status).toBe('skipped')
+  expect(result.totals.code).toBe(3)
+})
