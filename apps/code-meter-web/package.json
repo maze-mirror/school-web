@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@lezer/cpp": "^1.1.6",
+    "@lezer/javascript": "1.5.4",
     "@lezer/python": "^1.1.19",
     "exceljs": "^4.4.0",
     "pinia": "^4.0.3",

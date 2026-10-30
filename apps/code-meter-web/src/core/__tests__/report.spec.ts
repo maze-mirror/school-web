@@ -72,7 +72,7 @@ it('computes per-file distributions by language and recomputes the project distr
     analyzeText({ path: 'a.c', text: 'int a;\n' }),
     analyzeText({ path: 'b.c', text: 'int b;\n'.repeat(5) }),
     analyzeText({ path: 'c.py', text: 'def f():\n    pass\n' }),
-    analyzeText({ path: 'unsupported.java', text: 'ignored' }),
+    analyzeText({ path: 'unsupported.rs', text: 'ignored' }),
   ])
   const report = buildReport(scan)
   expect(report.byLanguage.find((row) => row.language === 'C')).toEqual({

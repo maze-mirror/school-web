@@ -2,7 +2,14 @@
 import { computed } from 'vue'
 import type { LanguageStat } from '@/core'
 const props = defineProps<{ languages: LanguageStat[]; total: number; cumulative?: boolean }>()
-const colors = ['var(--ink)', 'var(--pie-2)', 'var(--pie-3)', 'var(--pie-4)']
+const colors = [
+  'var(--ink)',
+  'var(--pie-2)',
+  'var(--pie-3)',
+  'var(--pie-4)',
+  'color-mix(in srgb, var(--ink) 60%, var(--pie-2))',
+  'color-mix(in srgb, var(--pie-2) 50%, var(--pie-3))',
+]
 const gradient = computed(() => {
   if (!props.total) return 'var(--surface)'
   let offset = 0

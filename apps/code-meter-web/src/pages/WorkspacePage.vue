@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, toRefs, watch } from 'vue'
-import { LANGUAGES, emptyCounts, localDateKey, type Snapshot } from '@/core'
+import { LANGUAGES, emptyCounts, localDateKey, supportedLanguageNames, type Snapshot } from '@/core'
 import { dailyComposition } from '@/core/composition'
 import { filePath } from '@/platform/files'
 import { downloadFile, snapshotCsv, snapshotJson, snapshotXlsx } from '@/platform/storage'
 import type { ScanState } from '@/composables/useScan'
 import type { HistoryState } from '@/composables/useHistory'
 import { formatTime, errorText } from '@/utils/format'
+import { visibleWarnings } from '@/utils/visibleWarnings'
 import MeterSelect from '@/components/MeterSelect.vue'
 import LanguagePie from '@/components/LanguagePie.vue'
 import ActivityGrid from '@/components/ActivityGrid.vue'
@@ -54,7 +55,7 @@ const allFileRows = computed(() => {
   const rows = (display.value?.files ?? []).filter(
     (f) =>
       f.path.toLowerCase().includes(search.value.toLowerCase()) &&
-      (!onlyIssues.value || f.status !== 'ok' || f.warnings.length),
+      (!onlyIssues.value || f.status !== 'ok' || visibleWarnings(f.warnings).length),
   )
   return rows.sort((a, b) =>
     sort.value === 'code' ? b.counts.code - a.counts.code : a.path.localeCompare(b.path),
@@ -66,7 +67,9 @@ watch([search, onlyIssues, sort, display], () => {
 })
 const successful = computed(() => display.value?.files.filter((f) => f.status === 'ok').length ?? 0)
 const issueCount = computed(
-  () => display.value?.files.filter((f) => f.status !== 'ok' || f.warnings.length).length ?? 0,
+  () =>
+    display.value?.files.filter((f) => f.status !== 'ok' || visibleWarnings(f.warnings).length)
+      .length ?? 0,
 )
 
 watch(
@@ -140,7 +143,7 @@ async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
             @drop.prevent="drop"
           >
             <span class="drop-mark" aria-hidden="true">[ + ]</span><strong>把源代码放在这里</strong>
-            <p>拖入文件，或从本地选择。<br />C / C++ / Python</p>
+            <p>拖入文件，或从本地选择。<br />{{ supportedLanguageNames() }}</p>
             <div class="drop-actions">
               <button class="primary-button" :disabled="busy" @click="fileInput?.click()">
                 选择文件 ↗</button
@@ -376,7 +379,6 @@ async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
               <th>注释</th>
               <th>空行</th>
               <th>总行</th>
-              <th>函数</th>
               <th>状态 / 说明</th>
             </tr>
           </thead>
@@ -388,16 +390,17 @@ async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
               <td>{{ f.status === 'ok' ? f.counts.commentOnly : '—' }}</td>
               <td>{{ f.status === 'ok' ? f.counts.blank : '—' }}</td>
               <td>{{ f.status === 'ok' ? f.counts.total : '—' }}</td>
-              <td>{{ f.status === 'ok' ? (f.functionCount ?? '—') : '—' }}</td>
               <td class="file-note">
                 <span>{{
                   f.status === 'ok' ? '完成' : f.status === 'skipped' ? '跳过' : '失败'
                 }}</span
-                ><small>{{ [f.reason, ...f.warnings].filter(Boolean).join('；') }}</small>
+                ><small>{{
+                  [f.reason, ...visibleWarnings(f.warnings)].filter(Boolean).join('；')
+                }}</small>
               </td>
             </tr>
             <tr v-if="!fileRows.length">
-              <td colspan="8" class="table-empty">
+              <td colspan="7" class="table-empty">
                 {{
                   display ? '没有符合筛选条件的文件。' : '选择文件或粘贴代码，结果会出现在这里。'
                 }}
