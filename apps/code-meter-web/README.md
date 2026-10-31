@@ -6,15 +6,16 @@
 
 ## 快速运行
 
-当前应用位于 school-web 工作区。推荐 Node.js 24.21.0、pnpm 12.11.2。在仓库根目录执行：
+当前应用位于 school-web 工作区，日常使用已包含六种语言的 `main` 分支。推荐 Node.js 24.21.0、pnpm 12.11.2。首次使用或依赖变化时，在仓库根目录执行 `pnpm install --frozen-lockfile`；平时启动只需：
 
 ~~~powershell
 Set-Location D:\Projects\school-web
-pnpm install --frozen-lockfile
-pnpm --filter code-meter-web dev --port 5173 --strictPort
+pnpm --filter code-meter-web dev --host 127.0.0.1 --port 5173 --strictPort
 ~~~
 
-打开终端显示的本地地址。停止服务器按 Ctrl+C。首次安装需要下载依赖；安装失败时先查看网络错误，不要删除源代码。若 pnpm 提示原生依赖构建未获批准，核对对应依赖后按其提示批准所需构建。
+打开 http://127.0.0.1:5173/，并保持终端运行；停止服务器按 Ctrl+C。启动命令运行当前检出的源码，不会自动切换版本。个人主页从其独立仓库在另一个终端启动，使用 5177 端口，无需切换 school-web 分支。
+
+首次安装需要下载依赖；安装失败时先查看网络错误，不要删除源代码。若 pnpm 提示原生依赖构建未获批准，核对对应依赖后按其提示批准所需构建。
 
 ## 开发约定
 
