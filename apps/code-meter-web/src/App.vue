@@ -119,12 +119,14 @@ onMounted(async () => {
                   : 'Code, without the noise.'
             }}
           </h1>
-          <p class="intro-copy">
+          <p v-if="page !== 'workspace'" class="intro-copy">
             {{
               page === 'history'
-                ? '每一次扫描，留下可复查的记录。'
+                // ? '每一次扫描，留下可复查的记录。'
+                ? ' '
                 : page === 'rules'
-                  ? '知道怎样计算，才知道数字意味着什么。'
+                  // ? '知道怎样计算，才知道数字意味着什么。'
+                  ? ' '
                   : '去掉空行与注释，看见代码本身。'
             }}
           </p>

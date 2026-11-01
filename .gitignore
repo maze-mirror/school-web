@@ -4,5 +4,8 @@ coverage/
 .env.local
 .env.*.local
 
+# Word owner files created while a report is open.
+/docs/reports/~$*.docx
+
 # L's homepage is maintained in its own repository; portfolio-web keeps only its link.
 /apps/portfolio-web/sailing_log/
