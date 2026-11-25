@@ -14,6 +14,8 @@ import {
   listSnapshots,
   saveSnapshot,
   snapshotXlsx,
+  snapshotCsv,
+  snapshotJson,
 } from '@/platform/storage'
 import App from '@/App.vue'
 
@@ -43,12 +45,36 @@ class TestWorker {
   constructor() {
     TestWorker.last = this
   }
-  postMessage(input: TestWorker['input']) {
+  postMessage(input: TestWorker['input'] | { snapshot: Snapshot; kind: 'csv' | 'json' | 'xlsx' }) {
+    // Real Worker transport rejects Vue proxies; exercise the clone boundary too.
+    input = structuredClone(input)
+    if ('kind' in input) {
+      queueMicrotask(async () => {
+        try {
+          const content =
+            input.kind === 'xlsx'
+              ? await snapshotXlsx(input.snapshot)
+              : input.kind === 'json'
+                ? snapshotJson(input.snapshot)
+                : snapshotCsv(input.snapshot)
+          this.onmessage?.({ data: { type: 'result', content } })
+        } catch (error) {
+          this.onmessage?.({
+            data: { type: 'error', message: (error as Error).message },
+          })
+        }
+      })
+      return
+    }
     this.input = input
     if (TestWorker.outcome === 'pending') return
     queueMicrotask(() => {
       if (TestWorker.outcome === 'error') {
-        this.onerror?.({ message: 'worker unavailable', filename: '/scan.worker.ts', lineno: 1 })
+        this.onerror?.({
+          message: 'worker unavailable',
+          filename: '/scan.worker.ts',
+          lineno: 1,
+        })
       } else this.finish()
     })
   }
@@ -121,7 +147,7 @@ it('preserves input and filters across pages; clearing text preserves results an
   await wrapper.get('#file-search').setValue('snippet')
   await navigate('项目介绍')
   expect(wrapper.get('.workspace-page').isVisible()).toBe(false)
-  expect(wrapper.get('.introduction-article h2').text()).toBe('从一份代码开始')
+  expect(wrapper.get('.introduction-article h2').text()).toBe('功能介绍')
   await navigate('工作台')
   expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toContain('print(1)')
   expect((wrapper.get('#file-search').element as HTMLInputElement).value).toBe('snippet')
@@ -143,7 +169,10 @@ it('reads uploaded files, retains the selection through navigation and counts re
     arrayBuffer: async () => bytes.slice().buffer,
   } as File
   const input = wrapper.get('input[type="file"]')
-  Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+  Object.defineProperty(input.element, 'files', {
+    value: [file],
+    configurable: true,
+  })
   await input.trigger('change')
   await navigate('扫描历史')
   await navigate('工作台')
@@ -167,9 +196,10 @@ it('restores a project from old snapshots, views it and removes its result and a
   expect(wrapper.get('.main-count strong').text()).toBe('2')
   await navigate('扫描历史')
   await wrapper.get('.history-actions .secondary-button').trigger('click')
-  expect(wrapper.get('.workspace-page').isVisible()).toBe(true)
-  expect(wrapper.get('.snapshot-caption').text()).toContain('历史快照')
-  await navigate('扫描历史')
+  expect(wrapper.get('.workspace-page').isVisible()).toBe(false)
+  expect(wrapper.get('.snapshot-page .main-count strong').text()).toBe('2')
+  expect(wrapper.get('.snapshot-metadata').text()).toContain('已保存快照')
+  await wrapper.get('.snapshot-page .section-heading button').trigger('click')
   await wrapper.get('.history-actions .text-button').trigger('click')
   await flushPromises()
   expect(deleteSnapshot).toHaveBeenCalledWith('old')
@@ -210,6 +240,13 @@ it('does not save a cancelled scan or accept a late worker reply after navigatio
   await open()
   await enterText()
   await scan()
+  expect(wrapper.get('.scan-detail').text()).toContain('分析代码')
+  expect(wrapper.get('.scan-detail').text()).toContain('snippet.py')
+  TestWorker.last.onmessage!({
+    data: { type: 'progress', done: 1, total: 1, path: 'snippet.py' },
+  })
+  await flushPromises()
+  expect(wrapper.get('.scan-detail').text()).toContain('已完成 1 / 1 个文件')
   await navigate('扫描历史')
   await navigate('工作台')
   await wrapper.get('.scan-actions .secondary-button').trigger('click')
@@ -306,7 +343,13 @@ it('shows creation only in the workspace and hides all project filters in the in
   await navigate('项目介绍')
   expect(wrapper.find('.project-toolbar').exists()).toBe(false)
   expect(wrapper.find('[role="alert"]').exists()).toBe(false)
-  expect(wrapper.get('.introduction-sidebar').text()).toContain('统计方式')
+  expect(wrapper.findAll('.introduction-sidebar a').map((link) => link.text())).toEqual([
+    '功能介绍',
+    '项目特点',
+    '设计思路',
+    '技术选型',
+  ])
+  expect(wrapper.find('.introduction-sidebar [aria-expanded]').exists()).toBe(false)
   await navigate('工作台')
   expect((wrapper.get('#project-name').element as HTMLInputElement).value).toBe('尚未建立的档案')
   expect(wrapper.find('[role="alert"]').exists()).toBe(true)
@@ -319,10 +362,14 @@ it('keeps English section headings and the physical-line equation in the workspa
     '02 / OVERVIEW',
     '03 / COMPOSITION',
     '04 / ACTIVITY',
-    '05 / FILES',
+    '05 / CURRENT FILES',
   ])
   expect(wrapper.get('.overview-note').text()).toBe('总物理行 = 空行 + 纯注释行 + 有效代码行。')
   expect(wrapper.get('nav').text()).not.toContain('统计口径')
+  expect(wrapper.find('.change-note').exists()).toBe(false)
+  expect(wrapper.get('.workspace-page').text()).not.toContain('区间净变化')
+  expect(wrapper.get('footer').text()).toContain('本地处理 · 无账号')
+  expect(wrapper.get('footer').text()).not.toContain('physical-lines-')
 })
 
 it('shows the new language summary and exports Excel from the displayed snapshot', async () => {
@@ -373,7 +420,11 @@ it('links a selected day to cumulative composition and opens its explanation fro
   yesterday.setDate(yesterday.getDate() - 1)
   const emptyDay = new Date(yesterday)
   emptyDay.setDate(emptyDay.getDate() - 1)
-  const python = { ...oldSnapshot(), id: 'python', scannedAt: yesterday.toISOString() }
+  const python = {
+    ...oldSnapshot(),
+    id: 'python',
+    scannedAt: yesterday.toISOString(),
+  }
   const cpp = {
     ...python,
     id: 'cpp',
@@ -406,16 +457,24 @@ it('links a selected day to cumulative composition and opens its explanation fro
   expect(wrapper.get('.composition-context').text()).toBe('当前快照')
   await wrapper.get('.heat-footer a').trigger('click')
   await flushPromises()
-  expect(wrapper.get('#activity-method').text()).toContain('我们是怎样统计的')
+  expect(wrapper.get('.introduction-article h2').text()).toBe('功能介绍')
+  expect(document.activeElement).toBe(wrapper.get('#activity-method').element)
   expect(wrapper.get('.introduction-article').text()).toContain('重复扫描同一份代码也累计')
   expect(wrapper.get('.introduction-article').text()).toContain('220 行')
-  expect(wrapper.get('[aria-controls="topics-methods"]').attributes('aria-expanded')).toBe('true')
+  expect(wrapper.get('a[href="#features"]').attributes('aria-current')).toBe('page')
   expect(wrapper.find('.project-toolbar').exists()).toBe(false)
-  await wrapper.get('[aria-controls="topics-methods"]').trigger('click')
-  expect(wrapper.find('#topics-methods').exists()).toBe(false)
-  await wrapper.get('[aria-controls="topics-methods"]').trigger('click')
-  await wrapper.get('a[href="#language-rules"]').trigger('click')
+  await wrapper.get('a[href="#characteristics"]').trigger('click')
+  expect(wrapper.get('.introduction-article').text()).toContain('IndexedDB')
+  expect(wrapper.get('.introduction-article').text()).toContain('更换网址端口不会自动同步')
+  await wrapper.get('a[href="#technology"]').trigger('click')
+  expect(wrapper.get('.introduction-article').text()).toContain('Vue 3')
+  expect(wrapper.get('.introduction-article').text()).toContain('Web Worker')
+  await wrapper.get('a[href="#features"]').trigger('click')
+  expect(wrapper.get('.introduction-article').text()).toContain('UTF-8 优先，失败按 GBK')
+  expect(wrapper.get('.introduction-article').text()).toContain('不修改原文件')
+  await wrapper.get('a[href="#design"]').trigger('click')
   expect(wrapper.get('.introduction-article').text()).toContain('三引号字符串')
+  expect(document.activeElement).toBe(wrapper.get('#design').element)
 })
 
 it('scans all three new text languages, retains history and exports unknown function counts', async () => {
@@ -447,7 +506,7 @@ it('scans all three new text languages, retains history and exports unknown func
   expect(wrapper.findAll('.history-row')).toHaveLength(3)
 })
 
-it('hides deferred fields and generic parser notes while preserving specific warnings and exported data', async () => {
+it('hides function fields but displays located parser warnings and preserves exported data', async () => {
   const files = [
     analyzeText({ path: 'function-only.py', text: 'def broken(:\n    pass' }),
     analyzeText({ path: 'line-warning.py', text: 'print("unfinished' }),
@@ -462,13 +521,14 @@ it('hides deferred fields and generic parser notes while preserving specific war
   expect(wrapper.get('.workspace-page').text()).not.toContain('函数')
   expect(wrapper.get('.report-summary thead').findAll('th')).toHaveLength(9)
   expect(wrapper.get('.files-section > .table-scroll thead').findAll('th')).toHaveLength(7)
-  expect(wrapper.get('.table-controls').text()).toContain('仅看异常 / 跳过（1）')
+  expect(wrapper.get('.table-controls').text()).toContain('仅看异常 / 跳过（2）')
   expect(wrapper.get('.files-section').text()).toContain('字符串可能未闭合')
-  expect(files[2]!.warnings.join('')).toContain('存在未完整识别的语法或未闭合内容')
-  expect(wrapper.get('.files-section').text()).not.toContain('存在未完整识别的语法或未闭合内容')
+  expect(files[2]!.warnings.join('')).toContain('当前解析器未完整识别此处语法')
+  expect(wrapper.get('.files-section').text()).toContain('第 1 行第')
+  expect(wrapper.get('.files-section').text()).toContain('不能据此判定源码错误')
   await wrapper.get('.table-controls input[type="checkbox"]').setValue(true)
   const rows = wrapper.findAll('.files-section > .table-scroll tbody tr')
-  expect(rows).toHaveLength(1)
+  expect(rows).toHaveLength(2)
   expect(rows[0]!.get('.file-path').text()).toBe('line-warning.py')
   await wrapper
     .findAll('button')
@@ -481,10 +541,273 @@ it('hides deferred fields and generic parser notes while preserving specific war
   expect(exported.snapshot.files[3].functionCount).toBe(1)
   expect(snapshot.files[0]!.warnings).toEqual(files[0]!.warnings)
   await navigate('项目介绍')
-  await wrapper.get('a[href="#report-output"]').trigger('click')
   expect(wrapper.get('.introduction-article').text()).not.toContain('函数')
-  await wrapper.get('[aria-controls="topics-methods"]').trigger('click')
-  await wrapper.get('a[href="#functions-distribution"]').trigger('click')
-  expect(wrapper.get('.introduction-article h2').text()).toBe('文件行数分布')
+  await wrapper.get('a[href="#design"]').trigger('click')
+  expect(wrapper.get('.introduction-article h2').text()).toBe('设计思路')
   expect(wrapper.get('.introduction-article').text()).not.toContain('函数')
+})
+
+it('previews supported candidates, selects GBK, filters stubs and restores their history', async () => {
+  await open()
+  const makeFile = (name: string, bytes: Uint8Array) =>
+    ({
+      name,
+      webkitRelativePath: '',
+      size: bytes.length,
+      arrayBuffer: async () => bytes.slice().buffer,
+    }) as File
+  const input = wrapper.get('input[type="file"]')
+  Object.defineProperty(input.element, 'files', {
+    configurable: true,
+    value: [
+      makeFile('a.py', new TextEncoder().encode('x = 1')),
+      makeFile('types.pyi', new TextEncoder().encode('# types\nx: int\ny: str')),
+      makeFile('legacy.c', new Uint8Array([47, 47, 32, 0xd6, 0xd0, 0xce, 0xc4, 10])),
+      makeFile('native.so', new Uint8Array([0xff, 0])),
+    ],
+  })
+  await input.trigger('change')
+  expect(wrapper.get('.selected-head').text()).toContain('候选源文件 3 个')
+  await scan()
+  expect(repository.snapshots[0]!.files.find((file) => file.path === 'legacy.c')?.status).toBe(
+    'error',
+  )
+  await wrapper.get('.input-settings summary').trigger('click')
+  await select('文件编码', 'UTF-8 优先，失败按 GBK')
+  await scan()
+  const latest = repository.snapshots[0]!
+  expect(JSON.parse(latest.configKey).encoding).toBe('utf-8-gbk')
+  expect(latest.files.find((file) => file.path === 'legacy.c')?.status).toBe('ok')
+  expect(latest.files.find((file) => file.path === 'native.so')?.status).toBe('skipped')
+  expect(wrapper.get('.main-count strong').text()).toBe('3')
+  expect(wrapper.get('.language-list').text()).toContain('Python 类型声明')
+  await select('文件语言筛选', 'Python 类型声明')
+  expect(wrapper.findAll('.files-section > .table-scroll tbody tr')).toHaveLength(1)
+  expect(wrapper.get('.files-section > .table-scroll tbody').text()).toContain('types.pyi')
+  await wrapper
+    .findAll('button')
+    .find((button) => button.text() === '导出 JSON ↗')!
+    .trigger('click')
+  await flushPromises()
+  const exported = JSON.parse(String(vi.mocked(downloadFile).mock.calls.at(-1)?.[1]))
+  expect(exported.summary.total.sourceFiles).toBe(3)
+  wrapper.unmount()
+  await open()
+  expect(wrapper.get('.main-count strong').text()).toBe('3')
+  expect(wrapper.get('.language-list').text()).toContain('Python 类型声明')
+})
+
+it('cancels during reading, restarts safely and ignores late data from the cancelled file', async () => {
+  repository.snapshots = [oldSnapshot()]
+  await open()
+  let finish!: (value: ArrayBuffer) => void
+  const next = vi.fn(async () => new ArrayBuffer(0))
+  const input = wrapper.get('input[type="file"]')
+  const files = [
+    {
+      name: 'pending.pyi',
+      size: 1,
+      webkitRelativePath: '',
+      arrayBuffer: () =>
+        new Promise<ArrayBuffer>((resolve) => {
+          finish = resolve
+        }),
+    },
+    { name: 'next.pyi', size: 0, webkitRelativePath: '', arrayBuffer: next },
+  ]
+  Object.defineProperty(input.element, 'files', {
+    configurable: true,
+    value: files,
+  })
+  await input.trigger('change')
+  await scan()
+  expect(wrapper.get('.scan-detail').text()).toContain('读取输入 · 已完成 0 / 2 个文件')
+  expect(wrapper.get('.scan-file').text()).toBe('pending.pyi')
+  await wrapper.get('.scan-actions .secondary-button').trigger('click')
+  expect(wrapper.get('.snapshot-caption').text()).toContain('本次已取消，当前显示上次结果')
+  await wrapper.get('.selected-head button').trigger('click')
+  const bytes = new TextEncoder().encode('x: int')
+  Object.defineProperty(input.element, 'files', {
+    configurable: true,
+    value: [
+      {
+        name: 'fresh.pyi',
+        size: bytes.length,
+        webkitRelativePath: '',
+        arrayBuffer: async () => bytes.buffer,
+      },
+    ],
+  })
+  await input.trigger('change')
+  await scan()
+  finish(new ArrayBuffer(0))
+  await flushPromises()
+  expect(next).not.toHaveBeenCalled()
+  expect(repository.snapshots).toHaveLength(2)
+  expect(repository.snapshots[0]!.files[0]?.path).toBe('fresh.pyi')
+  expect(wrapper.get('.main-count strong').text()).toBe('1')
+  expect(wrapper.find('.scan-detail').exists()).toBe(false)
+  expect(wrapper.get('.notice').text()).toContain('成功 1，失败 0，跳过 0')
+})
+
+it('paginates and filters 5000 files while an Excel export is pending', async () => {
+  const example = analyzeText({ path: 'a.pyi', text: 'x: int' })
+  repository.snapshots = [
+    {
+      ...oldSnapshot(),
+      ...summarize(
+        Array.from({ length: 5000 }, (_, i) => ({
+          ...example,
+          path: `types/${String(i).padStart(4, '0')}.pyi`,
+        })),
+      ),
+    },
+  ]
+  await open()
+  const rows = () => wrapper.findAll('.files-section > .table-scroll tbody tr')
+  expect(rows()).toHaveLength(50)
+  await wrapper.get('.pagination-info button').trigger('click')
+  expect(rows()).toHaveLength(100)
+  let finish!: (bytes: ArrayBuffer) => void
+  vi.mocked(snapshotXlsx).mockImplementationOnce(
+    () =>
+      new Promise<ArrayBuffer>((resolve) => {
+        finish = resolve
+      }),
+  )
+  await wrapper.get('.export-actions').findAll('button')[2]!.trigger('click')
+  await flushPromises()
+  expect(wrapper.get('.export-status').text()).toContain('正在生成 Excel')
+  await wrapper.get('#file-search').setValue('4999')
+  expect(rows()).toHaveLength(1)
+  expect(rows()[0]!.text()).toContain('types/4999.pyi')
+  finish(new Uint8Array([80, 75]).buffer)
+  await flushPromises()
+  expect(wrapper.get('.export-status').text()).toContain('Excel 已生成并发起下载')
+  expect(snapshotXlsx).toHaveBeenCalledWith(repository.snapshots[0])
+  expect(downloadFile).toHaveBeenCalledOnce()
+})
+
+it('opens a fixed historical result without the workspace chrome or changing the current input', async () => {
+  const archived: Snapshot = {
+    ...oldSnapshot(),
+    ...summarize([
+      analyzeText({ path: 'archived.py', text: 'x = 1\ny = 2' }),
+      analyzeText({ path: 'archived.c', text: 'int x;' }),
+    ]),
+  }
+  repository.snapshots = [archived]
+  await open()
+  const bytes = new TextEncoder().encode('print(1)')
+  const input = wrapper.get('input[type="file"]')
+  Object.defineProperty(input.element, 'files', {
+    configurable: true,
+    value: [
+      {
+        name: 'latest.py',
+        webkitRelativePath: '',
+        size: bytes.length,
+        arrayBuffer: async () => bytes.buffer,
+      },
+    ],
+  })
+  await input.trigger('change')
+  await scan()
+  expect(wrapper.get('.workspace-page .main-count strong').text()).toBe('1')
+  await wrapper.get(`[data-date="${localDateKey(new Date())}"]`).trigger('click')
+  expect(wrapper.get('.workspace-page .pie-center strong').text()).toBe('4')
+  await navigate('扫描历史')
+  const row = wrapper.findAll('.history-row').find((item) => item.text().includes('3 行'))!
+  await row.get('.secondary-button').trigger('click')
+  const result = wrapper.get('.snapshot-page')
+  expect(result.findAll('h1,h2').map((heading) => heading.text())).toEqual([
+    '01 / OVERVIEW',
+    '02 / FILES',
+  ])
+  expect(result.get('.main-count strong').text()).toBe('3')
+  expect(result.get('.pie-center strong').text()).toBe('3')
+  expect(result.get('.files-section').text()).toContain('archived.py')
+  expect(result.text()).not.toContain('latest.py')
+  expect(
+    result
+      .find('textarea,input[type="file"],.input-panel,.activity-grid,.composition-context')
+      .exists(),
+  ).toBe(false)
+  expect(wrapper.find('.site-header,.intro,.project-toolbar,.top-strip,footer').exists()).toBe(
+    false,
+  )
+  expect(wrapper.get('.workspace-page').isVisible()).toBe(false)
+  await result.get('.export-actions').findAll('button')[1]!.trigger('click')
+  await flushPromises()
+  const exported = JSON.parse(String(vi.mocked(downloadFile).mock.calls.at(-1)?.[1]))
+  expect(exported.snapshot.id).toBe(archived.id)
+  expect(exported.summary.total.codeLines).toBe(3)
+  await result.get('.section-heading button').trigger('click')
+  expect(wrapper.findAll('.history-row')).toHaveLength(2)
+  await navigate('工作台')
+  expect(wrapper.get('.selected-files').text()).toContain('latest.py')
+  expect(wrapper.get('.workspace-page .main-count strong').text()).toBe('1')
+  expect(wrapper.get('.workspace-page .pie-center strong').text()).toBe('4')
+  expect(repository.snapshots).toHaveLength(2)
+})
+
+it('keeps the historical snapshot fixed when a background scan completes', async () => {
+  repository.snapshots = [oldSnapshot()]
+  TestWorker.outcome = 'pending'
+  await open()
+  await enterText('print(1)')
+  await scan()
+  const pending = TestWorker.last
+  await navigate('扫描历史')
+  await wrapper.get('.history-actions .secondary-button').trigger('click')
+  pending.finish()
+  await flushPromises()
+  expect(wrapper.get('.snapshot-page .main-count strong').text()).toBe('2')
+  expect(wrapper.get('.snapshot-page .pie-center strong').text()).toBe('2')
+  expect(wrapper.get('.workspace-page').isVisible()).toBe(false)
+  expect(repository.snapshots).toHaveLength(2)
+  await wrapper.get('.snapshot-page .section-heading button').trigger('click')
+  await navigate('工作台')
+  expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('print(1)')
+  expect(wrapper.get('.workspace-page .main-count strong').text()).toBe('1')
+})
+
+it('expands historical files in batches of 50 and searches all filenames without altering totals', async () => {
+  const example = analyzeText({ path: 'a.pyi', text: 'x: int' })
+  const archived = {
+    ...oldSnapshot(),
+    ...summarize(
+      Array.from({ length: 125 }, (_, i) => ({
+        ...example,
+        path: i === 110 ? 'types/needle.PYI' : `types/${i}.pyi`,
+      })),
+    ),
+  }
+  repository.snapshots = [archived]
+  await open()
+  await navigate('扫描历史')
+  await wrapper.get('.history-actions .secondary-button').trigger('click')
+  const result = wrapper.get('.snapshot-page')
+  const rows = () => result.findAll('.files-section > .table-scroll tbody tr')
+  expect(rows()).toHaveLength(50)
+  expect(result.get('.pagination-info button').text()).toBe('继续展开')
+  await result.get('.pagination-info button').trigger('click')
+  expect(rows()).toHaveLength(100)
+  await result.get('.pagination-info button').trigger('click')
+  expect(rows()).toHaveLength(125)
+  expect(result.find('.pagination-info button').exists()).toBe(false)
+  await result.get('#snapshot-file-search').setValue('needle.pyi')
+  expect(rows()).toHaveLength(1)
+  expect(rows()[0]!.text()).toContain('needle.PYI')
+  expect(result.get('.main-count strong').text()).toBe('125')
+  expect(result.get('.pie-center strong').text()).toBe('125')
+  await result.get('.export-actions').findAll('button')[1]!.trigger('click')
+  await flushPromises()
+  const report = JSON.parse(String(vi.mocked(downloadFile).mock.calls.at(-1)?.[1]))
+  expect(report.summary.total.sourceFiles).toBe(125)
+  expect(report.snapshot.files).toHaveLength(125)
+  await result.get('.section-heading button').trigger('click')
+  await wrapper.get('.history-actions .secondary-button').trigger('click')
+  expect((wrapper.get('#snapshot-file-search').element as HTMLInputElement).value).toBe('')
+  expect(wrapper.findAll('.snapshot-page .files-section > .table-scroll tbody tr')).toHaveLength(50)
 })

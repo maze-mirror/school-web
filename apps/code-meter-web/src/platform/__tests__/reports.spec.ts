@@ -7,7 +7,10 @@ import { snapshotCsv, snapshotJson, snapshotXlsx } from '../reports'
 function sample(): Snapshot {
   return {
     ...summarize([
-      analyzeText({ path: '=evil.py', text: 'def f():\n    return 1\n\n# comment\n' }),
+      analyzeText({
+        path: '=evil.py',
+        text: 'def f():\n    return 1\n\n# comment\n',
+      }),
       analyzeText({ path: 'empty.py', text: '' }),
     ]),
     id: 's',
@@ -55,7 +58,7 @@ it('exports new languages through CSV, JSON and Excel without inventing function
     'TypeScript',
   ])
   expect(json.summary.total.functionCount).toBeNull()
-  expect(json.snapshot.ruleVersion).toBe('physical-lines-1.1')
+  expect(json.snapshot.ruleVersion).toBe('physical-lines-1.2')
   for (const name of ['Java', 'JavaScript', 'TypeScript'])
     expect(snapshotCsv(s)).toContain('"' + name + '"')
   const workbook = new ExcelJS.Workbook()
@@ -123,4 +126,39 @@ it('creates a real Excel workbook with numeric summaries, file details and defin
   expect(filename.value).toBe('=evil.py')
   expect(filename.type).toBe(ExcelJS.ValueType.String)
   expect(workbook.getWorksheet('统计说明')!.getCell('B1').value).toBe('项目')
+})
+
+it('keeps Python stubs separate in all exports, including GBK notes and old rule metadata', async () => {
+  const s = {
+    ...sample(),
+    ...summarize([
+      analyzeText({ path: 'a.py', text: 'x = 1' }),
+      analyzeText({
+        path: 'types.pyi',
+        text: '# 声明\nx: int\ny: str',
+        encoding: 'gbk',
+      }),
+    ]),
+  }
+  const json = JSON.parse(snapshotJson(s))
+  expect(
+    json.summary.byLanguage.map((row: { language: string; codeLines: number }) => [
+      row.language,
+      row.codeLines,
+    ]),
+  ).toEqual([
+    ['Python', 1],
+    ['Python 类型声明', 2],
+  ])
+  expect(json.summary.total.codeLines).toBe(3)
+  expect(json.snapshot.files[1].functionCount).toBeNull()
+  expect(snapshotCsv(s)).toContain('"Python 类型声明","1","2","0","1","—"')
+  expect(snapshotCsv(s)).toContain('GBK 解码')
+  const workbook = new ExcelJS.Workbook()
+  await workbook.xlsx.load(await snapshotXlsx(s))
+  expect(workbook.getWorksheet('语言汇总')!.getCell('A3').value).toBe('Python 类型声明')
+  expect(workbook.getWorksheet('语言汇总')!.getCell('C4').value).toBe(3)
+  expect(workbook.getWorksheet('文件明细')!.getCell('J3').value).toContain('GBK 解码')
+  const old = { ...s, ruleVersion: 'physical-lines-1.1' }
+  expect(JSON.parse(snapshotJson(old)).snapshot.ruleVersion).toBe('physical-lines-1.1')
 })

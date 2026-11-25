@@ -9,6 +9,7 @@ const colors = [
   'var(--pie-4)',
   'color-mix(in srgb, var(--ink) 60%, var(--pie-2))',
   'color-mix(in srgb, var(--pie-2) 50%, var(--pie-3))',
+  'color-mix(in srgb, var(--ink) 35%, var(--pie-4))',
 ]
 const gradient = computed(() => {
   if (!props.total) return 'var(--surface)'

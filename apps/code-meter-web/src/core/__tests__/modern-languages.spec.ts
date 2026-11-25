@@ -197,3 +197,34 @@ it('aggregates all six languages, leaves unsupported functions unknown and separ
   expect(analyzeText({ path: 'a.vue', text: '<template />' }).status).toBe('skipped')
   expect(analyzeText({ path: 'a.tsx', text: '<div />' }).status).toBe('skipped')
 })
+
+it('locates H002 recovery without changing the line counts or declaring source errors', () => {
+  const text = '// test\r\nconst flags: number[] = [0]\r\n\r\nflags[0]! |= 1\r\n'
+  const result = analyzeText({ path: 'h002.ts', text })
+  const control = analyzeText({
+    path: 'control.ts',
+    text: text.replace('flags[0]! |= 1', 'flags[0] = (flags[0] ?? 0) | 1'),
+  })
+  expect(result.counts).toEqual(control.counts)
+  expect(result.warnings.join('')).toContain('第 4 行第')
+  expect(result.warnings.join('')).toContain('不能据此判定源码错误')
+  expect(result.warnings.join('')).toContain('行分类是否受影响尚未确认')
+  expect(control.warnings).toEqual([])
+})
+
+it('reports Java source coordinates through Unicode escape translation', () => {
+  const text = '\\u002f\\u002a unfinished\r\ncomment'
+  const result = analyzeText({ path: 'Broken.java', text })
+  expect(result.warnings.join('')).toContain('第 1 行第 1 列')
+  expect(result.warnings.join('')).toContain('块注释未找到结束标记')
+  expect(result.counts.commentOnly).toBe(2)
+  expect(analyzeText({ path: 'Bad.java', text: 'int x;\n\\uQQQQ' }).warnings.join('')).toContain(
+    '第 2 行第 1 列',
+  )
+})
+
+it('caps parser recovery messages for a large malformed source', () => {
+  const result = analyzeText({ path: 'bad.ts', text: 'flags[0]! |= 1\n'.repeat(100) })
+  expect(result.warnings.length).toBeLessThanOrEqual(6)
+  expect(result.warnings.at(-1)).toContain('仅列出前 5 处')
+})

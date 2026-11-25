@@ -1,23 +1,20 @@
 <script setup lang="ts">
 import { computed, ref, toRefs, watch } from 'vue'
-import { LANGUAGES, emptyCounts, localDateKey, supportedLanguageNames, type Snapshot } from '@/core'
+import { LANGUAGES, emptyCounts, supportedLanguageNames, type Snapshot } from '@/core'
 import { dailyComposition } from '@/core/composition'
-import { filePath } from '@/platform/files'
-import { downloadFile, snapshotCsv, snapshotJson, snapshotXlsx } from '@/platform/storage'
+import { filePath, LIMITS, prepareFiles, parseExclusions } from '@/platform/files'
 import type { ScanState } from '@/composables/useScan'
 import type { HistoryState } from '@/composables/useHistory'
-import { formatTime, errorText } from '@/utils/format'
-import { visibleWarnings } from '@/utils/visibleWarnings'
+import { formatTime } from '@/utils/format'
 import MeterSelect from '@/components/MeterSelect.vue'
 import LanguagePie from '@/components/LanguagePie.vue'
 import ActivityGrid from '@/components/ActivityGrid.vue'
-import ReportSummary from '@/components/ReportSummary.vue'
+import FilesReport from '@/components/FilesReport.vue'
 const props = defineProps<{
   scan: ScanState
   display: Snapshot | null
   days: HistoryState['days']
   history: Snapshot[]
-  comparison: { value: number | null; reason: string } | undefined
   projectId: string
 }>()
 const emit = defineEmits<{ explainActivity: [] }>()
@@ -33,10 +30,14 @@ const {
   selectedFiles,
   text,
   language,
+  encoding,
   exclusions,
   busy,
   progress,
   phase,
+  currentFile,
+  processed,
+  fileTotal,
   saveState,
   canScan,
 } = toRefs(props.scan)
@@ -46,37 +47,12 @@ const dragging = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const folderInput = ref<HTMLInputElement | null>(null)
 const textInput = ref<HTMLTextAreaElement | null>(null)
-const search = ref('')
-const onlyIssues = ref(false)
-const sort = ref<'code' | 'path'>('code')
-const counts = computed(() => display.value?.totals ?? emptyCounts())
-const rowLimit = ref(50)
-const allFileRows = computed(() => {
-  const rows = (display.value?.files ?? []).filter(
-    (f) =>
-      f.path.toLowerCase().includes(search.value.toLowerCase()) &&
-      (!onlyIssues.value || f.status !== 'ok' || visibleWarnings(f.warnings).length),
-  )
-  return rows.sort((a, b) =>
-    sort.value === 'code' ? b.counts.code - a.counts.code : a.path.localeCompare(b.path),
-  )
-})
-const fileRows = computed(() => allFileRows.value.slice(0, rowLimit.value))
-watch([search, onlyIssues, sort, display], () => {
-  rowLimit.value = 50
-})
-const successful = computed(() => display.value?.files.filter((f) => f.status === 'ok').length ?? 0)
-const issueCount = computed(
-  () =>
-    display.value?.files.filter((f) => f.status !== 'ok' || visibleWarnings(f.warnings).length)
-      .length ?? 0,
+const selection = computed(() =>
+  prepareFiles(selectedFiles.value, parseExclusions(exclusions.value)),
 )
-
-watch(
-  () => props.projectId,
-  () => {
-    search.value = ''
-  },
+const counts = computed(() => display.value?.totals ?? emptyCounts())
+const successful = computed(
+  () => display.value?.files.filter((file) => file.status === 'ok').length ?? 0,
 )
 function chooseFiles(event: Event) {
   const input = event.target as HTMLInputElement
@@ -92,30 +68,6 @@ function drop(event: DragEvent) {
 function clearText() {
   props.scan.clearText()
   textInput.value?.focus()
-}
-const exporting = ref(false)
-const exportError = ref('')
-async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
-  const s = display.value
-  if (!s || exporting.value) return
-  const name = `code-meter-${localDateKey(new Date(s.scannedAt))}`
-  exporting.value = true
-  exportError.value = ''
-  try {
-    const content =
-      kind === 'xlsx' ? await snapshotXlsx(s) : kind === 'json' ? snapshotJson(s) : snapshotCsv(s)
-    const mime =
-      kind === 'xlsx'
-        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        : kind === 'json'
-          ? 'application/json;charset=utf-8'
-          : 'text/csv;charset=utf-8'
-    downloadFile(`${name}.${kind}`, content, mime)
-  } catch (error) {
-    exportError.value = '导出失败：' + errorText(error)
-  } finally {
-    exporting.value = false
-  }
 }
 </script>
 <template>
@@ -164,8 +116,9 @@ async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
           <div v-if="selectedFiles.length" class="selected-files">
             <div class="selected-head">
               <span
-                >{{ selectedFiles.length }} 个文件 ·
-                {{ (selectedFiles.reduce((n, f) => n + f.size, 0) / 1024).toFixed(1) }}
+                >已选 {{ selectedFiles.length }} 个文件 · 候选源文件
+                {{ selection.candidates.length }} 个 ·
+                {{ (selection.totalBytes / 1024).toFixed(1) }}
                 KB</span
               ><button class="text-button" :disabled="busy" @click="selectedFiles = []">
                 清空
@@ -184,7 +137,7 @@ async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
               </li>
             </ul>
             <small v-if="selectedFiles.length > 12"
-              >另外 {{ selectedFiles.length - 12 }} 个文件将在统计时处理。</small
+              >列表仅展示前 12 个，另有 {{ selectedFiles.length - 12 }} 个已选文件未列出。</small
             >
           </div></template
         >
@@ -219,11 +172,31 @@ async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
           ></textarea>
         </template>
         <details class="input-settings">
-          <summary>排除目录与输入限制</summary>
+          <summary>文件编码、排除目录与输入限制</summary>
+          <div v-if="mode === 'files'" class="toolbar-field">
+            <span>文件编码</span>
+            <MeterSelect
+              v-model="encoding"
+              label="文件编码"
+              :disabled="busy"
+              :options="[
+                { value: 'utf-8', label: 'UTF-8（严格）' },
+                { value: 'utf-8-gbk', label: 'UTF-8 优先，失败按 GBK' },
+                { value: 'gbk', label: 'GBK（全部候选文件）' },
+              ]"
+            />
+          </div>
+          <p v-if="mode === 'files'">
+            混合 UTF-8 / GBK 目录可选择“UTF-8 优先，失败按 GBK”；不会自动猜测其他编码。 GBK
+            解码会在文件说明中标记，原文件不会修改。若需转换，请在编辑器中以原编码打开，
+            核对中文后另存为 UTF-8，再选择 UTF-8 重试。
+          </p>
           <label>排除目录名称（逗号分隔）<input v-model="exclusions" :disabled="busy" /></label>
           <p>
-            UTF-8 · 单文件 ≤5 MB · 排除目录后总量 ≤40 MB、≤2000
-            个文件。文件夹入口取决于浏览器支持，不支持时请使用多文件选择。
+            单文件 / 粘贴文本 ≤5 MB · 候选源文件总量 ≤40 MB、≤{{ LIMITS.maxFiles }}
+            个。
+            候选源文件仅包含排除目录、去重并按支持后缀筛选后的文件；不支持文件不读取、不占限额。
+            .pyi 单列“Python 类型声明”，默认计入总量。文件夹入口取决于浏览器支持。
           </p>
         </details>
         <div class="scan-actions">
@@ -245,6 +218,15 @@ async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
           </button>
         </div>
         <progress v-if="busy" :value="progress" max="100" aria-label="统计进度"></progress>
+        <div v-if="busy" class="scan-detail" role="status" aria-live="polite">
+          <span
+            >{{ phase
+            }}<template v-if="phase !== '保存快照'">
+              · 已完成 {{ processed }} / {{ fileTotal }} 个文件</template
+            ></span
+          >
+          <span v-if="currentFile" class="scan-file" :title="currentFile">{{ currentFile }}</span>
+        </div>
       </div>
       <div class="overview-panel">
         <div class="section-heading">
@@ -312,113 +294,8 @@ async function exportResult(kind: 'json' | 'csv' | 'xlsx') {
           v-model:selected-date="selectedDate"
           @explain="emit('explainActivity')"
         />
-        <div class="change-note">
-          <span>区间净变化</span
-          ><strong>{{
-            comparison?.value != null
-              ? (comparison.value > 0 ? '+' : '') + comparison.value + ' 行'
-              : '—'
-          }}</strong
-          ><small>{{ comparison?.reason || '可比期末快照 − 期初基线' }}</small>
-        </div>
       </div>
     </section>
-    <section class="files-section">
-      <div class="section-heading">
-        <div>
-          <h2 class="section-index">05 / FILES</h2>
-        </div>
-        <div class="export-actions">
-          <button
-            class="secondary-button"
-            :disabled="!display || exporting"
-            @click="exportResult('csv')"
-          >
-            导出 CSV ↗</button
-          ><button
-            class="secondary-button"
-            :disabled="!display || exporting"
-            @click="exportResult('json')"
-          >
-            导出 JSON ↗</button
-          ><button
-            class="secondary-button"
-            :disabled="!display || exporting"
-            @click="exportResult('xlsx')"
-          >
-            {{ exporting ? '正在导出…' : '导出 Excel ↗' }}
-          </button>
-        </div>
-      </div>
-      <p v-if="exportError" class="notice" role="alert">{{ exportError }}</p>
-      <ReportSummary :snapshot="display" />
-      <div class="table-controls">
-        <label class="sr-only" for="file-search">搜索文件路径</label
-        ><input id="file-search" v-model="search" placeholder="搜索文件路径…" /><label
-          ><input v-model="onlyIssues" type="checkbox" /> 仅看异常 / 跳过（{{ issueCount }}）</label
-        >
-        <div class="sort-select toolbar-field">
-          <span>排序</span
-          ><MeterSelect
-            v-model="sort"
-            label="排序"
-            :options="[
-              { value: 'code', label: '代码行 ↓' },
-              { value: 'path', label: '路径 A–Z' },
-            ]"
-          />
-        </div>
-      </div>
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>文件</th>
-              <th>语言</th>
-              <th>代码</th>
-              <th>注释</th>
-              <th>空行</th>
-              <th>总行</th>
-              <th>状态 / 说明</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="(f, i) in fileRows" :key="f.path + i">
-              <td class="file-path">{{ f.path }}</td>
-              <td>{{ f.language ?? '—' }}</td>
-              <td>{{ f.status === 'ok' ? f.counts.code : '—' }}</td>
-              <td>{{ f.status === 'ok' ? f.counts.commentOnly : '—' }}</td>
-              <td>{{ f.status === 'ok' ? f.counts.blank : '—' }}</td>
-              <td>{{ f.status === 'ok' ? f.counts.total : '—' }}</td>
-              <td class="file-note">
-                <span>{{
-                  f.status === 'ok' ? '完成' : f.status === 'skipped' ? '跳过' : '失败'
-                }}</span
-                ><small>{{
-                  [f.reason, ...visibleWarnings(f.warnings)].filter(Boolean).join('；')
-                }}</small>
-              </td>
-            </tr>
-            <tr v-if="!fileRows.length">
-              <td colspan="7" class="table-empty">
-                {{
-                  display ? '没有符合筛选条件的文件。' : '选择文件或粘贴代码，结果会出现在这里。'
-                }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="table-controls pagination-info">
-        <span>显示 {{ fileRows.length }} / {{ allFileRows.length }} 个文件</span
-        ><button
-          v-if="fileRows.length < allFileRows.length"
-          class="secondary-button"
-          @click="rowLimit += 50"
-        >
-          再显示 50 个
-        </button>
-      </div>
-    </section>
+    <FilesReport :snapshot="display" :scope-key="projectId" />
   </div>
 </template>

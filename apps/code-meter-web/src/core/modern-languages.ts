@@ -5,10 +5,17 @@ const typescriptParser = javascriptParser.configure({ dialect: 'ts' })
 const COMMENT = 1
 const CODE = 2
 type Span = { from: number; to: number; kind: number }
+type Issue = { from: number; to: number; reason: string }
 
 /** Only lexical classification is required for Java; preserve escaped text-block delimiters. */
 function javaSpans(input: string) {
   const spans: Span[] = []
+  const issues: Issue[] = []
+  let issueCount = 0
+  const record = (item: Issue) => {
+    issueCount++
+    if (issues.length < 5) issues.push(item)
+  }
   let incomplete = false
   let i = 0
   while (i < input.length) {
@@ -19,7 +26,10 @@ function javaSpans(input: string) {
       spans.push({ from, to: i, kind: COMMENT })
     } else if (input.startsWith('/*', i)) {
       const end = input.indexOf('*/', i + 2)
-      if (end < 0) incomplete = true
+      if (end < 0) {
+        incomplete = true
+        record({ from, to: from + 2, reason: '块注释未找到结束标记' })
+      }
       i = end < 0 ? input.length : end + 2
       spans.push({ from, to: i, kind: COMMENT })
     } else if (input[i] === '"' || input[i] === "'") {
@@ -29,7 +39,10 @@ function javaSpans(input: string) {
       let closed = false
       while (i < input.length) {
         if (input[i] === '\\') {
-          if (!block && input[i + 1] === '\n') incomplete = true
+          if (!block && input[i + 1] === '\n') {
+            incomplete = true
+            record({ from: i, to: i + 1, reason: '普通字符串出现反斜杠换行' })
+          }
           i = Math.min(input.length, i + 2)
         } else if (block ? input.startsWith('"""', i) : input[i] === quote) {
           i += block ? 3 : 1
@@ -38,11 +51,14 @@ function javaSpans(input: string) {
         } else if (!block && input[i] === '\n') break
         else i++
       }
-      if (!closed) incomplete = true
+      if (!closed) {
+        incomplete = true
+        record({ from, to: from + (block ? 3 : 1), reason: '字符串未找到结束标记' })
+      }
       spans.push({ from, to: i, kind: CODE })
     } else i++
   }
-  return { spans, incomplete }
+  return { spans, incomplete, issues, issueCount }
 }
 
 /** Java translates eligible Unicode escapes before recognizing comments and strings.
@@ -56,6 +72,7 @@ function javaInput(text: string) {
   let copied = 0
   let removed = 0
   let malformed = false
+  const malformedOffsets: number[] = []
   for (let i = 0; i < text.length; i++) {
     if (text[i] !== '\\') {
       slashes = 0
@@ -74,7 +91,10 @@ function javaInput(text: string) {
       slashes = value === '\\' ? slashes + 1 : 0
       previousEscape = true
     } else {
-      if (eligible && text[i + 1] === 'u') malformed = true
+      if (eligible && text[i + 1] === 'u') {
+        malformed = true
+        if (malformedOffsets.length < 5) malformedOffsets.push(i)
+      }
       slashes++
       previousEscape = false
     }
@@ -90,7 +110,7 @@ function javaInput(text: string) {
     }
     return offset + (edits[low - 1]?.removed ?? 0)
   }
-  return { input, sourceOffset, malformed }
+  return { input, sourceOffset, malformed, malformedOffsets }
 }
 
 /** Classify parser-recognized lexical regions; do not execute or count statements. */
@@ -110,35 +130,60 @@ export function analyzeModern(source: Source): FileStat {
   }
   const text = source.text.replace(/\r\n?/g, '\n')
   if (!text) return output
-  const { input, sourceOffset, malformed } =
+  const { input, sourceOffset, malformed, malformedOffsets } =
     language === 'java'
       ? javaInput(text)
-      : { input: text, sourceOffset: (offset: number) => offset, malformed: false }
+      : {
+          input: text,
+          sourceOffset: (offset: number) => offset,
+          malformed: false,
+          malformedOffsets: [],
+        }
   const spans: Span[] = []
+  const issues: Issue[] = []
+  let issueCount = 0
+  function issue(from: number, to: number, reason: string) {
+    issueCount++
+    if (issues.length < 5) issues.push({ from, to, reason })
+  }
   let incomplete = malformed
   if (language === 'java') {
     const lexical = javaSpans(input)
     for (const span of lexical.spans) spans.push(span)
     incomplete ||= lexical.incomplete
+    for (const item of lexical.issues) issue(item.from, item.to, item.reason)
+    issueCount += lexical.issueCount - lexical.issues.length
   } else {
     const parser = language === 'typescript' ? typescriptParser : javascriptParser
     parser.parse(input).iterate({
       enter(node) {
         const name = node.type.name
-        if (node.type.isError) incomplete = true
+        if (node.type.isError) {
+          incomplete = true
+          issue(
+            node.from,
+            node.to,
+            '当前解析器未完整识别此处语法；可能是未支持的合法写法或内容不完整，不能据此判定源码错误',
+          )
+        }
         if (name === 'LineComment' || name === 'BlockComment' || name === 'Hashbang') {
           spans.push({ from: node.from, to: node.to, kind: COMMENT })
         }
         if (name === 'String' || name === 'RegExp') {
           spans.push({ from: node.from, to: node.to, kind: CODE })
-          if (name === 'String' && input[node.to - 1] !== input[node.from]) incomplete = true
+          if (name === 'String' && input[node.to - 1] !== input[node.from]) {
+            incomplete = true
+            issue(node.from, node.to, '字符串未被完整识别')
+          }
           if (name === 'RegExp') {
             const literal = input.slice(node.from, node.to)
             const closing = literal.lastIndexOf('/')
             let slashes = 0
             for (let at = closing - 1; at >= 0 && literal[at] === '\\'; at--) slashes++
-            if (closing < 1 || slashes % 2 || !/^[dgimsuvy]*$/.test(literal.slice(closing + 1)))
+            if (closing < 1 || slashes % 2 || !/^[dgimsuvy]*$/.test(literal.slice(closing + 1))) {
               incomplete = true
+              issue(node.from, node.to, '正则字面量未被完整识别')
+            }
           }
         }
         if (name === 'TemplateString' || name === 'TemplateType') {
@@ -197,7 +242,28 @@ export function analyzeModern(source: Source): FileStat {
     else output.counts.blank++
   }
   if (incomplete) {
-    output.warnings.push('存在未完整识别的语法或未闭合内容；行统计基于已识别区域，请结合源码复核。')
+    function location(from: number, to: number) {
+      const first = lineAt(from)
+      const last = lineAt(Math.max(from, to - 1))
+      return (
+        `第 ${first + 1} 行第 ${from - lineStarts[first]! + 1} 列` +
+        (to > from + 1
+          ? ` 至第 ${last + 1} 行第 ${Math.max(from, to - 1) - lineStarts[last]! + 1} 列`
+          : '')
+      )
+    }
+    for (const offset of malformedOffsets)
+      output.warnings.push(
+        `${location(offset, offset + 2)}：Java Unicode 转义未被完整识别；请复核该区域，行分类是否受影响尚未确认。`,
+      )
+    for (const item of issues)
+      output.warnings.push(
+        `${location(sourceOffset(item.from), sourceOffset(item.to))}附近：${item.reason}；请复核该区域，行分类是否受影响尚未确认。`,
+      )
+    if (issueCount > issues.length)
+      output.warnings.push(
+        `另有 ${issueCount - issues.length} 处未识别位置；本文件仅列出前 ${issues.length} 处。`,
+      )
   }
   return output
 }

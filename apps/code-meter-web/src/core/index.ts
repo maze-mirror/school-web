@@ -1,11 +1,12 @@
 import { countFunctions, FUNCTION_RULE_VERSION } from './functions'
 import { analyzeModern } from './modern-languages'
-export const RULE_VERSION = 'physical-lines-1.1'
+export const RULE_VERSION = 'physical-lines-1.2'
 export type Language = string
 export const LANGUAGES: { id: Language; name: string; extensions: string[] }[] = [
   { id: 'c', name: 'C', extensions: ['c', 'h'] },
   { id: 'cpp', name: 'C++', extensions: ['cpp', 'cc', 'cxx', 'hpp', 'hh', 'hxx'] },
   { id: 'python', name: 'Python', extensions: ['py', 'pyw'] },
+  { id: 'python-stub', name: 'Python 类型声明', extensions: ['pyi'] },
   { id: 'java', name: 'Java', extensions: ['java'] },
   { id: 'javascript', name: 'JavaScript', extensions: ['js', 'mjs', 'cjs'] },
   { id: 'typescript', name: 'TypeScript', extensions: ['ts', 'mts', 'cts'] },
@@ -22,6 +23,7 @@ export interface Source {
   path: string
   text: string
   language?: Language
+  encoding?: 'utf-8' | 'gbk'
 }
 export interface FileStat {
   path: string
@@ -55,7 +57,7 @@ export interface Snapshot extends ScanResult {
 }
 export const emptyCounts = (): Counts => ({ total: 0, blank: 0, commentOnly: 0, code: 0, mixed: 0 })
 export const detectLanguage = (path: string): Language | null => {
-  const ext = path.split('.').pop()?.toLowerCase() ?? ''
+  const ext = /\.([^.\\/]+)$/.exec(path)?.[1]?.toLowerCase() ?? ''
   return LANGUAGES.find((l) => l.extensions.includes(ext))?.id ?? null
 }
 type State = 'normal' | 'block' | 'quote' | 'triple' | 'raw' | 'line'
@@ -85,7 +87,7 @@ function analyzeBuiltin(source: Source): FileStat {
   let state: State = 'normal',
     quote = '',
     rawEnd = ''
-  const python = language === 'python'
+  const python = language === 'python' || language === 'python-stub'
   for (const line of lines) {
     let code = state === 'quote' || state === 'triple' || state === 'raw'
     let comment = state === 'block' || state === 'line'
@@ -245,6 +247,8 @@ export function analyzeText(source: Source): FileStat {
     }
   try {
     const result = analyzer({ ...source, language })
+    if (source.encoding === 'gbk' && result.status === 'ok')
+      result.warnings.push('已按所选编码策略使用 GBK 解码；请确认源文件编码，原文件未修改。')
     if (result.status === 'ok' && ['c', 'cpp', 'python'].includes(language)) {
       const functions = countFunctions(source.text, language)
       result.functionCount = functions.count

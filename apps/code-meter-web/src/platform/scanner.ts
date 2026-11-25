@@ -7,7 +7,7 @@ export function startScan(
   sources: Source[],
   rejected: FileStat[],
   configKey: string,
-  onProgress: (done: number, total: number) => void,
+  onProgress: (done: number, total: number, path: string) => void,
 ) {
   let worker: Worker | undefined
   let settled = false
@@ -24,7 +24,7 @@ export function startScan(
       worker = new Worker(new URL('../workers/scan.worker.ts', import.meta.url), { type: 'module' })
       worker.onmessage = (e) => {
         if (settled) return
-        if (e.data?.type === 'progress') onProgress(e.data.done, e.data.total)
+        if (e.data?.type === 'progress') onProgress(e.data.done, e.data.total, e.data.path ?? '')
         else if (e.data?.type === 'result') {
           settled = true
           worker?.terminate()

@@ -3,12 +3,14 @@ import { buildReport, REPORT_COLUMNS } from '@/core/report'
 
 export const REPORT_DEFINITIONS = {
   sourceFiles: '仅包含本次快照中成功统计的源文件；空文件也参与文件数与分布统计。',
+  pythonStubs:
+    'physical-lines-1.2 起，.pyi 单列为 Python 类型声明，不并入 .py/.pyw 的 Python 汇总，默认计入项目总量。旧快照保留原始范围和数值。',
   codeLines: '有效物理代码行；混合行包含在代码行中。',
   commentLines: '纯注释行，不重复计入混合行。',
   distribution:
     '最大值、最小值、均值和中位数以每个成功源文件的有效代码行数为样本；项目合计按全部成功文件重新计算。',
   functions:
-    'C/C++/Python 按源文本中的命名函数定义计数；含嵌套函数、方法和有函数体的构造/析构函数，不计调用、声明或 lambda。未展开 C/C++ 宏与条件编译。Java/JavaScript/TypeScript 暂不提供函数统计；未支持、语法无法完整识别或旧历史未记录时为 null。',
+    'C/C++/Python（.py/.pyw）按源文本中的命名函数定义计数；含嵌套函数、方法和有函数体的构造/析构函数，不计调用、声明或 lambda。未展开 C/C++ 宏与条件编译。Python 类型声明（.pyi）、Java/JavaScript/TypeScript 暂不提供函数统计；未支持、语法无法完整识别或旧历史未记录时为 null。',
   dailyActivity:
     '每天累计每次成功保存扫描的有效代码行；重复扫描累计。按所选区间的最高日合计归一化，不代表新增代码或开发工作量。',
 }
@@ -18,7 +20,10 @@ export function snapshotReport(snapshot: Snapshot) {
     schemaVersion: 2,
     snapshot: {
       ...snapshot,
-      files: snapshot.files.map((file) => ({ ...file, functionCount: file.functionCount ?? null })),
+      files: snapshot.files.map((file) => ({
+        ...file,
+        functionCount: file.functionCount ?? null,
+      })),
     },
     summary: buildReport(snapshot),
     definitions: REPORT_DEFINITIONS,
@@ -104,10 +109,16 @@ export async function snapshotXlsx(snapshot: Snapshot): Promise<ArrayBuffer> {
     ['文件明细', fileRows(snapshot)],
     ['统计说明', metadataRows(snapshot)],
   ] as const) {
-    const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] })
+    const sheet = workbook.addWorksheet(name, {
+      views: [{ state: 'frozen', ySplit: 1 }],
+    })
     sheet.addRows(rows)
     sheet.getRow(1).font = { bold: true }
-    sheet.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEAE7DF' } }
+    sheet.getRow(1).fill = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFEAE7DF' },
+    }
     sheet.columns.forEach((column, index) => {
       column.width = name === '统计说明' && index === 1 ? 100 : index === 0 ? 36 : 16
       if (name === '语言汇总' && index >= 8) column.numFmt = '0.00'

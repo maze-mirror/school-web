@@ -7,7 +7,13 @@ import {
   type UnwrapNestedRefs,
 } from 'vue'
 import { LANGUAGES, RULE_VERSION, type Language, type Snapshot } from '@/core'
-import { DEFAULT_EXCLUSIONS, LIMITS, readSources } from '@/platform/files'
+import {
+  DEFAULT_EXCLUSIONS,
+  LIMITS,
+  parseExclusions,
+  readSources,
+  type FileEncoding,
+} from '@/platform/files'
 import { startScan } from '@/platform/scanner'
 import type { Project } from './useProjects'
 import { errorText } from '@/utils/format'
@@ -17,20 +23,24 @@ export function useScan(options: {
   notice: Ref<string>
   save: (snapshot: Snapshot) => Promise<void>
   refreshToday: () => void
-  onResult: () => void
   hasDisplay: () => boolean
 }) {
-  const { project, notice, save, refreshToday, onResult, hasDisplay } = options
+  const { project, notice, save, refreshToday, hasDisplay } = options
   const mode = ref<'files' | 'text'>('files')
   const selectedFiles = ref<File[]>([])
   const text = ref('')
   const language = ref<Language>('python')
+  const encoding = ref<FileEncoding>('utf-8')
   const exclusions = ref(DEFAULT_EXCLUSIONS.join(', '))
   const current = ref<Snapshot | null>(null)
   const saveState = ref('')
   const busy = ref(false)
   const progress = ref(0)
   const phase = ref('')
+  const currentFile = ref('')
+  const processed = ref(0)
+  const fileTotal = ref(0)
+  let reading: AbortController | null = null
   let running: ReturnType<typeof startScan> | null = null
   let scanToken = 0
   const canScan = computed(
@@ -65,18 +75,16 @@ export function useScan(options: {
     busy.value = true
     progress.value = 0
     phase.value = '读取输入'
+    currentFile.value = ''
+    processed.value = 0
+    fileTotal.value = 0
     notice.value = ''
     saveState.value = ''
     const p = project.value!
+    const readController = new AbortController()
+    reading = readController
     try {
-      const excluded = [
-        ...new Set(
-          exclusions.value
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean),
-        ),
-      ].sort()
+      const excluded = parseExclusions(exclusions.value)
       if (
         mode.value === 'text' &&
         new TextEncoder().encode(text.value).length > LIMITS.maxFileBytes
@@ -84,7 +92,16 @@ export function useScan(options: {
         throw new Error('粘贴文本超过 5 MB')
       const input =
         mode.value === 'files'
-          ? await readSources(selectedFiles.value, excluded)
+          ? await readSources(selectedFiles.value, excluded, encoding.value, {
+              signal: readController.signal,
+              onProgress: ({ done, total, path }) => {
+                if (token !== scanToken) return
+                processed.value = done
+                fileTotal.value = total
+                currentFile.value = path
+                progress.value = total ? Math.round((done / total) * 100) : 100
+              },
+            })
           : {
               sources: [
                 {
@@ -97,14 +114,23 @@ export function useScan(options: {
             }
       if (token !== scanToken) return
       phase.value = '分析代码'
+      progress.value = 0
+      processed.value = 0
+      fileTotal.value = input.sources.length
+      currentFile.value = input.sources[0]?.path ?? ''
       const configKey = JSON.stringify({
         rule: RULE_VERSION,
         exclusions: excluded,
         override: mode.value === 'text' ? language.value : null,
+        encoding: mode.value === 'files' ? encoding.value : null,
         pythonDocstrings: 'code',
       })
-      running = startScan(input.sources, input.rejected, configKey, (done, total) => {
+      running = startScan(input.sources, input.rejected, configKey, (done, total, path) => {
+        if (token !== scanToken) return
         progress.value = total ? Math.round((done / total) * 100) : 100
+        processed.value = done
+        fileTotal.value = total
+        currentFile.value = path
       })
       const result = await running.promise
       if (token !== scanToken) return
@@ -117,7 +143,6 @@ export function useScan(options: {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       }
       current.value = snapshot
-      onResult()
       progress.value = 100
       refreshToday()
       if (!result.files.some((f) => f.status === 'ok')) {
@@ -126,10 +151,14 @@ export function useScan(options: {
         return
       }
       phase.value = '保存快照'
+      currentFile.value = ''
       try {
         await save(snapshot)
         saveState.value = '已保存到此浏览器'
-        notice.value = '统计完成。项目总量使用本次快照，不累加重复扫描。'
+        const success = result.files.filter((file) => file.status === 'ok').length
+        const errors = result.files.filter((file) => file.status === 'error').length
+        const skipped = result.files.length - success - errors
+        notice.value = `统计完成：成功 ${success}，失败 ${errors}，跳过 ${skipped}。${errors ? '结果仅包含成功文件，请查看失败原因。' : ''}项目总量使用本次快照，不累加重复扫描。`
       } catch (e) {
         saveState.value = '保存失败，可导出备份'
         notice.value = `统计已完成，但历史未保存：${errorText(e)}`
@@ -143,20 +172,29 @@ export function useScan(options: {
       if (token === scanToken) {
         busy.value = false
         running = null
+        reading = null
         phase.value = ''
+        currentFile.value = ''
       }
     }
   }
   function cancel() {
+    if (phase.value === '保存快照') return
     scanToken++
+    reading?.abort()
+    reading = null
     running?.cancel()
     running = null
     busy.value = false
+    phase.value = ''
+    currentFile.value = ''
+    if (hasDisplay()) saveState.value = '本次已取消，当前显示上次结果'
     notice.value = '已取消，本次任务没有保存成功快照。'
   }
 
   onBeforeUnmount(() => {
     scanToken++
+    reading?.abort()
     running?.cancel()
   })
   return {
@@ -164,12 +202,16 @@ export function useScan(options: {
     selectedFiles,
     text,
     language,
+    encoding,
     exclusions,
     current,
     saveState,
     busy,
     progress,
     phase,
+    currentFile,
+    processed,
+    fileTotal,
     canScan,
     addFiles,
     clearText,
