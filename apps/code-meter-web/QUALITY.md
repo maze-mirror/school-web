@@ -4,7 +4,9 @@
 
 - 本轮实际运行全量单元测试：11 个文件、110 项通过；`pnpm --filter code-meter-web type-check` 通过。
 - 使用线上路径执行 `pnpm --filter code-meter-web build-only --base=/school-web/`，生产构建通过；生成的 HTML 正确引用 `/school-web/assets/`，扫描与导出 Worker 均生成独立文件。Git 差异空白检查通过。
-- 已核对工作流所用 Actions 主版本均存在。用户将仓库改为 public 后，GitHub Pages 已设置为公开访问、Actions 构建方式；本地检查不替代线上工作流及浏览器验收，结果待补。
+- 已核对工作流所用 Actions 主版本均存在。用户将仓库改为 public 后，GitHub Pages 已设置为公开访问、Actions 构建方式。应用提交 `7baa1fa73c3b23f7310a5bf175826de5ffc95360` 已推送至 `main`；[工作流 45577979772](https://github.com/maze-mirror/school-web/actions/runs/45577979772) 的安装、类型检查、测试、构建、上传和部署步骤均成功。
+- 对 `https://maze-mirror.github.io/school-web/` 进行无登录 HTTP 检查：首页、入口脚本、样式、扫描 Worker 和导出 Worker 均返回 200；线上入口文件名与本地生产构建一致，首页描述包含当前语言范围。
+- 内置浏览器打开线上页面时连接超时，未完成本轮线上视觉与交互验收；HTTP 检查不替代真实扫描、持久化和下载流程验收，不将历史浏览器结果写为本轮通过。
 - 独立 Sailing Log 仓库未修改或推送。Sites 备用站点已创建但未发布，最终采用 GitHub Pages，不保留其本地 hosting manifest。
 
 ## 2026-11-11：统计档案说明

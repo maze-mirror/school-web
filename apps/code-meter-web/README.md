@@ -6,7 +6,7 @@
 
 ## 在线访问与发布
 
-公开网页：https://maze-mirror.github.io/school-web/ 。首次发布以 GitHub Actions 的 `Deploy Code Meter` 成功及实际访问检查为准。
+公开网页：https://maze-mirror.github.io/school-web/ 。2026 年 11 月 25 日首次部署成功，已核对网页及脚本、样式、Worker 均可匿名访问。
 
 推送 code-meter 源码或构建配置到 `main` 后，工作流自动安装锁定依赖、检查类型、运行测试、构建并发布到 GitHub Pages；也可在 Actions 中手动运行。仅修改 Markdown 说明不会重新部署。只发布 `apps/code-meter-web/dist`，其他应用不参与构建或发布。
 

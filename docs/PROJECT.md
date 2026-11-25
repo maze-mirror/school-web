@@ -4,7 +4,7 @@
 
 ## 当前阶段：GitHub 同步与公开发布
 
-2026-11-25：用户授权同步 code-meter 当前版本并提供公共网页，随后自行将 school-web 仓库改为 public。已配置 GitHub Pages 与自动部署工作流，本地测试、类型检查及生产构建通过；正在提交、推送和核验线上部署。功能与部署配置见 [CHANGELOG.md](../apps/code-meter-web/CHANGELOG.md)，实际检查及后续线上结果见 [QUALITY.md](../apps/code-meter-web/QUALITY.md#2026-11-25github-同步与首次公开发布)。本轮不修改或推送独立主页仓库。
+2026-11-25：code-meter 当前版本已随 `7baa1fa` 推送至 GitHub `main`，自动部署成功，公共网页为 https://maze-mirror.github.io/school-web/ 。后续推送统计应用代码或构建配置将自动检查并发布。功能与部署配置见 [CHANGELOG.md](../apps/code-meter-web/CHANGELOG.md)，本轮检查证据及浏览器验收限制见 [QUALITY.md](../apps/code-meter-web/QUALITY.md#2026-11-25github-同步与首次公开发布)。用户已自行将 school-web 改为 public；本轮未修改或推送独立主页仓库。
 
 ## 前阶段：四部分项目介绍已同步
 

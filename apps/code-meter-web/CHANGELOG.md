@@ -2,7 +2,9 @@
 
 记录功能、修复及兼容性变化；项目进度见 [PROJECT.md](../../docs/PROJECT.md)，验证证据与限制见 [QUALITY.md](QUALITY.md)。本文件从 2026-11-04 开始维护，较早的记录暂保留在原有进度文档中。
 
-## 未发布
+## 2026-11-25 已发布
+
+以下本地阶段改动已随 `7baa1fa` 同步至 GitHub，并通过 [首次部署](https://github.com/maze-mirror/school-web/actions/runs/45577979772) 发布到 [Code / Meter](https://maze-mirror.github.io/school-web/)。各阶段正文中的“未提交、推送或部署”仅表示当时状态。
 
 ### 2026-11-25：GitHub Pages 发布配置
 
