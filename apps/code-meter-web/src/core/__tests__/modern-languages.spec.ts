@@ -16,7 +16,7 @@ it.each([
   const result = analyzeText({ path, text: '' })
   expect(result.status).toBe('ok')
   expect(result.counts.total).toBe(0)
-  expect(result.functionCount).toBeNull()
+  expect(result.functionCount).toBe(language === 'java' ? 0 : null)
 })
 
 it.each(['java', 'javascript', 'typescript'])('keeps physical boundaries for %s', (language) => {
@@ -66,7 +66,8 @@ it('keeps escaped triple quotes inside Java text blocks and does not continue li
     ].join('\n'),
   })
   expect(result.counts).toEqual({ total: 7, code: 6, commentOnly: 1, blank: 0, mixed: 1 })
-  expect(result.warnings).toEqual([])
+  expect(result.functionIncomplete).toBe(true)
+  expect(result.warnings).toEqual([expect.stringContaining('函数个数在可识别范围内统计')])
 })
 
 it('handles Java Unicode escapes before classification while preserving original physical lines', () => {
@@ -77,6 +78,7 @@ it('handles Java Unicode escapes before classification while preserving original
     blank: 0,
     mixed: 0,
   })
+
   expect(analyzeText({ path: 'A.java', text: String.raw`// note\u000a int x;` }).counts).toEqual({
     total: 1,
     code: 1,
@@ -90,6 +92,15 @@ it('handles Java Unicode escapes before classification while preserving original
   })
   expect(literal.counts).toEqual({ total: 1, code: 1, commentOnly: 0, blank: 0, mixed: 1 })
   expect(literal.warnings).toEqual([])
+})
+
+it('maps Java function body sizes to original lines after Unicode newline escapes', () => {
+  const result = analyzeText({
+    path: 'A.java',
+    text: String.raw`class A { void f() {\u000a int x = 1;\u000a // note\u000a x++; } }`,
+  })
+  expect(result.functionCount).toBe(1)
+  expect(result.functionLineSizes).toEqual([1])
 })
 
 it('distinguishes JavaScript template text from interpolated code, including nested templates', () => {
@@ -180,8 +191,9 @@ it('aggregates all six languages, leaves unsupported functions unknown and separ
   expect(result.totals).toEqual({ total: 6, code: 6, commentOnly: 0, blank: 0, mixed: 0 })
   const report = buildReport(result)
   expect(report.total.sourceFiles).toBe(6)
-  expect(report.total.functionCount).toBeNull()
-  expect(report.byLanguage.find((row) => row.language === 'Java')?.functionCount).toBeNull()
+  expect(report.total.functionCount).toBe(0)
+  expect(report.total.functionLanguageCoverage).toEqual({ counted: 4, total: 6 })
+  expect(report.byLanguage.find((row) => row.language === 'Java')?.functionCount).toBe(0)
   expect(report.byLanguage.find((row) => row.language === 'C')?.functionCount).toBe(0)
   const end: Snapshot = {
     ...result,

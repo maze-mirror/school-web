@@ -1,5 +1,5 @@
 import { countFunctions, FUNCTION_RULE_VERSION } from './functions'
-import { analyzeModern } from './modern-languages'
+import { analyzeModern, analyzeModernWithKinds } from './modern-languages'
 export const RULE_VERSION = 'physical-lines-1.2'
 export type Language = string
 export const LANGUAGES: { id: Language; name: string; extensions: string[] }[] = [
@@ -34,7 +34,10 @@ export interface FileStat {
   warnings: string[]
   functionCount?: number | null
   functionRuleVersion?: string
+  functionLineSizes?: number[]
+  functionIncomplete?: boolean
 }
+export type LineKind = 'code' | 'comment' | 'blank'
 export interface LanguageStat {
   language: Language
   name: string
@@ -63,7 +66,7 @@ export const detectLanguage = (path: string): Language | null => {
 type State = 'normal' | 'block' | 'quote' | 'triple' | 'raw' | 'line'
 
 /** Physical-line lexer; Python docstrings stay code and source is never executed. */
-function analyzeBuiltin(source: Source): FileStat {
+function analyzeBuiltinWithKinds(source: Source): { stat: FileStat; kinds: LineKind[] } {
   const language = source.language ?? detectLanguage(source.path)
   const output: FileStat = {
     path: source.path,
@@ -75,13 +78,20 @@ function analyzeBuiltin(source: Source): FileStat {
   }
   if (!language)
     return {
-      ...output,
-      status: 'skipped',
-      reason: '暂不支持此语言；当前支持 ' + supportedLanguageNames() + '。',
+      stat: {
+        ...output,
+        status: 'skipped',
+        reason: '暂不支持此语言；当前支持 ' + supportedLanguageNames() + '。',
+      },
+      kinds: [],
     }
   if (source.text.includes('\0'))
-    return { ...output, status: 'error', reason: '内容含二进制空字符，未按源代码统计。' }
-  if (!source.text) return output
+    return {
+      stat: { ...output, status: 'error', reason: '内容含二进制空字符，未按源代码统计。' },
+      kinds: [],
+    }
+  if (!source.text) return { stat: output, kinds: [] }
+  const kinds: LineKind[] = []
   const lines = source.text.replace(/\r\n?/g, '\n').split('\n')
   if (lines[lines.length - 1] === '') lines.pop()
   let state: State = 'normal',
@@ -195,10 +205,16 @@ function analyzeBuiltin(source: Source): FileStat {
     }
     output.counts.total++
     if (code) {
+      kinds.push('code')
       output.counts.code++
       if (comment) output.counts.mixed++
-    } else if (comment) output.counts.commentOnly++
-    else output.counts.blank++
+    } else if (comment) {
+      kinds.push('comment')
+      output.counts.commentOnly++
+    } else {
+      kinds.push('blank')
+      output.counts.blank++
+    }
     if (state === 'quote' && !line.endsWith('\\')) {
       output.warnings.push(`第 ${output.counts.total} 行：字符串可能未闭合，按物理行扫描。`)
       state = 'normal'
@@ -206,7 +222,10 @@ function analyzeBuiltin(source: Source): FileStat {
   }
   if (state === 'block' || state === 'raw' || state === 'triple')
     output.warnings.push('文件末尾有未闭合的注释或字符串；建议检查源文件。')
-  return output
+  return { stat: output, kinds }
+}
+function analyzeBuiltin(source: Source): FileStat {
+  return analyzeBuiltinWithKinds(source).stat
 }
 export type Analyzer = (source: Source) => FileStat
 const analyzers = new Map<string, Analyzer>(
@@ -246,13 +265,21 @@ export function analyzeText(source: Source): FileStat {
       warnings: [],
     }
   try {
-    const result = analyzer({ ...source, language })
+    const normalizedSource = { ...source, language, text: source.text.replace(/\r\n?/g, '\n') }
+    const withKinds = ['c', 'cpp', 'python', 'java'].includes(language)
+      ? language === 'java'
+        ? analyzeModernWithKinds(normalizedSource)
+        : analyzeBuiltinWithKinds(normalizedSource)
+      : null
+    const result = withKinds?.stat ?? analyzer(normalizedSource)
     if (source.encoding === 'gbk' && result.status === 'ok')
       result.warnings.push('已按所选编码策略使用 GBK 解码；请确认源文件编码，原文件未修改。')
-    if (result.status === 'ok' && ['c', 'cpp', 'python'].includes(language)) {
-      const functions = countFunctions(source.text, language)
+    if (result.status === 'ok' && ['c', 'cpp', 'python', 'java'].includes(language)) {
+      const functions = countFunctions(normalizedSource.text, language, withKinds?.kinds)
       result.functionCount = functions.count
       result.functionRuleVersion = FUNCTION_RULE_VERSION
+      result.functionLineSizes = functions.sizes
+      result.functionIncomplete = functions.incomplete
       if (functions.warning) result.warnings.push(functions.warning)
     }
     return result

@@ -168,6 +168,7 @@ async function exportResult(kind: ExportKind) {
             <th>注释</th>
             <th>空行</th>
             <th>总行</th>
+            <th>函数个数</th>
             <th>状态 / 说明</th>
           </tr>
         </thead>
@@ -181,6 +182,9 @@ async function exportResult(kind: ExportKind) {
             <td>{{ f.status === 'ok' ? f.counts.commentOnly : '—' }}</td>
             <td>{{ f.status === 'ok' ? f.counts.blank : '—' }}</td>
             <td>{{ f.status === 'ok' ? f.counts.total : '—' }}</td>
+            <td>
+              {{ f.status === 'ok' ? (f.functionCount?.toLocaleString('zh-CN') ?? '—') : '—' }}
+            </td>
             <td class="file-note">
               <span>{{
                 f.status === 'ok' ? '完成' : f.status === 'skipped' ? '跳过' : '失败'
@@ -191,7 +195,7 @@ async function exportResult(kind: ExportKind) {
             </td>
           </tr>
           <tr v-if="!fileRows.length">
-            <td colspan="7" class="table-empty">
+            <td colspan="8" class="table-empty">
               {{ display ? '没有符合筛选条件的文件。' : '选择文件或粘贴代码，结果会出现在这里。' }}
             </td>
           </tr>

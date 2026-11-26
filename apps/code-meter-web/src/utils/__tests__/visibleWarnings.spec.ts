@@ -8,7 +8,8 @@ it('shows legacy parser notes without inventing locations or changing stored war
   ]
   const stored = [...original]
   const visible = visibleWarnings(original)
-  expect(visible).toHaveLength(1)
+  expect(visible).toHaveLength(2)
+  expect(visible[1]).toBe(original[1])
   expect(visible[0]).toContain('旧快照')
   expect(visible[0]).toContain('未保存行列位置')
   expect(original).toEqual(stored)

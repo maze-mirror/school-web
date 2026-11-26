@@ -1,5 +1,5 @@
 import { parser as javascriptParser } from '@lezer/javascript'
-import type { FileStat, Source } from './index'
+import type { FileStat, Source, LineKind } from './index'
 
 const typescriptParser = javascriptParser.configure({ dialect: 'ts' })
 const COMMENT = 1
@@ -64,7 +64,7 @@ function javaSpans(input: string) {
 /** Java translates eligible Unicode escapes before recognizing comments and strings.
  * Keep an offset map so escaped line terminators never invent source physical lines.
  */
-function javaInput(text: string) {
+export function javaInput(text: string) {
   const edits: { end: number; removed: number }[] = []
   const chunks: string[] = []
   let slashes = 0
@@ -115,6 +115,10 @@ function javaInput(text: string) {
 
 /** Classify parser-recognized lexical regions; do not execute or count statements. */
 export function analyzeModern(source: Source): FileStat {
+  return analyzeModernWithKinds(source).stat
+}
+
+export function analyzeModernWithKinds(source: Source): { stat: FileStat; kinds: LineKind[] } {
   const language = source.language!
   const output: FileStat = {
     path: source.path,
@@ -126,10 +130,13 @@ export function analyzeModern(source: Source): FileStat {
     functionCount: null,
   }
   if (source.text.includes('\0')) {
-    return { ...output, status: 'error', reason: '内容含二进制空字符，未按源代码统计。' }
+    return {
+      stat: { ...output, status: 'error', reason: '内容含二进制空字符，未按源代码统计。' },
+      kinds: [],
+    }
   }
   const text = source.text.replace(/\r\n?/g, '\n')
-  if (!text) return output
+  if (!text) return { stat: output, kinds: [] }
   const { input, sourceOffset, malformed, malformedOffsets } =
     language === 'java'
       ? javaInput(text)
@@ -265,5 +272,10 @@ export function analyzeModern(source: Source): FileStat {
         `另有 ${issueCount - issues.length} 处未识别位置；本文件仅列出前 ${issues.length} 处。`,
       )
   }
-  return output
+  return {
+    stat: output,
+    kinds: Array.from(flags, (flag): LineKind =>
+      flag & CODE ? 'code' : flag & COMMENT ? 'comment' : 'blank',
+    ),
+  }
 }

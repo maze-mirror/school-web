@@ -2,6 +2,31 @@
 
 记录功能、修复及兼容性变化；项目进度见 [PROJECT.md](../../docs/PROJECT.md)，验证证据与限制见 [QUALITY.md](QUALITY.md)。本文件从 2026-11-04 开始维护，较早的记录暂保留在原有进度文档中。
 
+## 2026-11-26：函数统计 V6–V7 收尾（本地）
+
+- 完成 H001 决议与 H002 缓解状态记录，补齐函数识别、汇总和页面兼容测试。规则 `function-definitions-2.0`、导出 schemaVersion 3；旧快照不重算，缺失不当作 0。
+- 当前 V1–V7 已完成；具体能力见下方分阶段条目，本轮实际检查见 [QUALITY.md](QUALITY.md#2026-11-26函数统计-v6-v7)。未提交、推送或部署。
+
+## 2026-11-26：函数统计 V4–V5（本地）
+
+- CSV 与 Excel 的语言汇总同时输出按文件、按函数两个块，与页面当前切换状态无关；文件明细列保持原样，缺失函数数据继续显示 `—`。
+- JSON 报表升级为 schemaVersion 3：文件明细剔除 `functionLineSizes`，汇总保留四个函数尺寸指标，其余字段保留；不修改原快照或重算旧历史。CSV／Excel 元数据同步报表版本和变更说明。
+- 更新函数及两套分布的导出口径；项目介绍的设计思路加入任务指定的四段函数说明，并替换解析说明。
+- 当前完成 V1–V5，V6–V7 整体收尾待后续授权。验证见 [QUALITY.md](QUALITY.md#2026-11-26函数统计-v4-v5)。未提交、推送或部署。
+
+## 2026-11-25：函数统计 V2–V3（本地）
+
+- 接入 C/C++/Python/Java 扫描的函数数量、函数体有效代码行尺寸及不完整诊断；Java Unicode 转义解析偏移映射回规范化原文行。JavaScript/TypeScript 保持函数数据缺失，历史快照不回填。
+- 汇总增加部分语言覆盖数和按函数 max/min/mean/median；页面按文件／按函数切换，工作台和历史共用组件，文件明细恢复函数个数列；函数解析诊断进入异常列表。
+- 当时完成 V1–V3；后续 V4 导出和 V5 介绍进展见本文件 2026-11-26 条目。schemaVersion 在 V4 前维持 2。未提交、推送或部署。验证见 [QUALITY.md](QUALITY.md#2026-11-25函数统计-v2-v3)。
+
+## 2026-11-25：函数统计 V1（本地，等待确认）
+
+- 仅完成 [function_fix.md](../../docs/function_fix.md) 的 V1 与新增函数解析测试：规则版本改为 `function-definitions-2.0`，接入 `@lezer/java@1.2.1`，按各语言定义及函数体节点计数。C/C++ 实测函数体节点为 `CompoundStatement`，Python 为 `Body`。
+- 解析错误节点不再使整份文件函数数为 null，改为保留可识别数量、返回 `incomplete` 并给出实际错误节点数量；lambda、无函数体的方法和声明不计入。
+- 返回 `count / sizes / incomplete / warning`；可选第三参数接收与文本对齐的逐行分类，用于函数体有效代码行尺寸。不提供分类时 `sizes=[]`，扫描入口传递分类、Java 挂载及保存新字段留待 V2。
+- V2–V7 未实施，页面与导出恢复尚未完成，报表仍为 schemaVersion 2；旧历史不重算。未提交、推送或部署。验证与已知回归限制见 [QUALITY.md](QUALITY.md#2026-11-25函数统计-v1)。
+
 ## 2026-11-25 已发布
 
 以下本地阶段改动已随 `7baa1fa` 同步至 GitHub，并通过 [首次部署](https://github.com/maze-mirror/school-web/actions/runs/45577979772) 发布到 [Code / Meter](https://maze-mirror.github.io/school-web/)。各阶段正文中的“未提交、推送或部署”仅表示当时状态。

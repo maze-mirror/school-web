@@ -1,5 +1,48 @@
 # 代码统计质量检查记录
 
+## 2026-11-26：函数统计 V6–V7
+
+- 本轮按任务要求实际运行三条命令：`pnpm --filter code-meter-web type-check` 退出码 0，耗时 6.23s；`pnpm --filter code-meter-web test:unit -- --run`：12 个测试文件、136 项全部通过，Duration 22.49s；`pnpm --filter code-meter-web build` 退出码 0，总耗时 5.32s，其中 Vite 输出 60 modules transformed、built in 634ms。构建脚本内再次执行类型检查并通过，未将前轮结果当作本轮验证。
+- 拆开 Java 接口默认方法、构造器、lambda、匿名内部类和 record 的识别用例，避免组合样例的合计数掩盖单类误计；补无绑定 C++ lambda、C 与 JavaScript 部分覆盖、单函数中位数、全部尺寸缺失仍保留文件分布的回归。五函数汇总样例同步数量与尺寸，手算 max/min/mean/median 为 5/1/3/3。
+- 页面新增四语言具体函数数、JS／TS 缺失、4/6 覆盖标注、切换后列数与表头不变、旧快照缺失值的测试；既有双块导出、JSON 字段、介绍文案、诊断和历史用例随全量测试通过。
+- 本轮再次直接使用 `@lezer/java@1.2.1` 探测 `class A { Map<String,List<Integer>> f; void a(){} void b(){} void c(){} }`，实际输出 `{"errorNodes":2,"methodsRecognized":3,"expectedMethods":3,"recognitionRate":1}`。错误节点 2 个，方法识别 3/3（100%）；函数测试同时确认 count=3、incomplete=true、警告含实际错误数。首次命令行 `node -e` 探测未成功启动，改为标准输入后获得上述结果，无临时脚本残留。
+- 本轮未进行真实浏览器视觉、布局宽度测量或下载验收；切换列数、提示和数据由自动页面测试核查，不能替代浏览器像素布局验证。解析器兼容性未修复，H002 改为不完整标注后已缓解、不再阻断函数展示；不据此推断所有输入均无行分类误差。
+- V1–V7 开发与规定自动检查完成；旧历史不重算，未修改其他应用，未提交、推送或部署。
+
+## 2026-11-26：函数统计 V4–V5
+
+- 本轮实际执行 `pnpm --filter code-meter-web exec vitest run`：12 个测试文件、130 项全部通过，Duration 14.24s。包含 CSV／Excel 双块、JSON 尺寸数组剔除与原快照保留、函数汇总指标、旧快照缺失值、Java 与 JS／TS 覆盖差异，以及介绍设计说明的页面回归。
+- `pnpm --filter code-meter-web type-check`：`vue-tsc --build` 退出码 0；`pnpm --filter code-meter-web build-only`：60 modules transformed，built in 1.57s，退出码 0。类型检查未单独计时。
+- 首轮导出与页面定向测试 29 项中 3 项失败：新增断言误将 Python 样例函数尺寸写为 1，现有解析范围与逐行分类实际为 2；核对解析实现后修正预期，未修改解析口径。最终全量结果以上述本轮输出为准。
+- Excel 测试实际生成并重新加载工作簿，验证两个汇总块及均值／中位数数字格式；含多个块的汇总工作表不设置跨块自动筛选，文件明细保留筛选。
+- 未进行真实浏览器视觉验收或下载操作；V6 决议文档、V7 整体收尾未作为完成项。未重算历史、提交、推送或部署。
+
+## 2026-11-25：函数统计 V2–V3
+
+- 定向验证 `pnpm --filter code-meter-web exec vitest run src/core/__tests__/report.spec.ts src/core/__tests__/modern-languages.spec.ts src/__tests__/App.spec.ts src/utils/__tests__/visibleWarnings.spec.ts src/core/__tests__/functions.spec.ts`：5 个测试文件、79 项通过，Duration 5.10s。
+- `pnpm --filter code-meter-web type-check`：`vue-tsc --build` 退出码 0。`pnpm --filter code-meter-web build`：60 modules transformed，Vite built in 905ms，退出码 0。
+- 定向覆盖 Java Unicode 转义换行映射、函数行尺寸，报表覆盖率／函数尺寸中位数，默认按文件、按函数 aria 状态及说明，文件函数列与可见诊断。尚未执行完整全量测试或真实浏览器手工验收；导出和介绍仍待后续阶段。未提交、推送或部署。
+
+## 2026-11-25：函数统计 V1
+
+- 新增测试实际执行 `pnpm --filter code-meter-web exec vitest run src/core/__tests__/functions.spec.ts`：1 个文件通过、17 项通过，Duration 1.48s（tests 15ms）。覆盖 C++ 类内／类外定义、构造／析构、运算符、lambda，C 声明／宏／调用，Python def 与 lambda，以及 Java 方法、构造器、匿名类、record、嵌套泛型与函数体行数。
+- `pnpm --filter code-meter-web type-check`：`vue-tsc --build` 退出码 0。`pnpm --filter code-meter-web build`：类型检查及生产构建退出码 0，Vite 输出 `58 modules transformed`、`built in 905ms`。类型检查未单独计时，不虚报耗时。
+- 完整回归实际执行 `pnpm --filter code-meter-web test:unit -- --run`：12 个文件中 10 通过、2 失败；127 项中 125 通过、2 失败，Duration 5.84s。`report.spec.ts` 仍断言解析恢复时函数数为 null，实得 1；`App.spec.ts` 仍断言旧“函数个数暂不可用”文案，实得新不完整提示。遵照本轮仅 V1 的边界未修改这两组后续阶段断言，不能视为全量通过。首次带文件路径的脚本命令也因额外 `--` 执行了全套，最终以 exec vitest 的明确筛选命令核对新增 spec。
+- C++ 按任务给定脚本探测并删除临时脚本，实际输出如下；函数体另实测为 `CompoundStatement`（任务表原写 Block），因此实现按真实节点取范围。
+
+```text
+free      FunctionDefinition FunctionDeclarator
+inClass   FieldDeclarationList FunctionDefinition FunctionDeclarator
+ctor      FieldDeclarationList FunctionDefinition FunctionDeclarator DestructorName
+op        FieldDeclarationList FunctionDefinition FunctionDeclarator ParameterDeclaration
+outside   FunctionDefinition FunctionDeclarator
+lambda    Declaration LambdaExpression LambdaCaptureSpecifier AbstractFunctionDeclarator ParameterDeclaration
+```
+
+- Java 样例 `class A { Map<String,List<Integer>> f; void a(){} void b(){} void c(){} }`：`@lezer/java@1.2.1` 实测错误节点 2 个、方法识别 3/3；新增 spec 确认 count=3、incomplete=true，并产生含实际错误节点数量的提示。
+- V1 尺寸只在显式传入逐行分类时计算；扫描入口尚未传入分类，Java 尚未接入 analyzeText，新字段尚未保存。Java Unicode 预处理与原文偏移映射、页面／汇总／导出均待 V2 以后，本轮未作集成或浏览器验收。
+- pnpm 安装指定 Java 依赖时自动在 workspace 配置加入该精确版本的 minimumReleaseAgeExclude，锁文件新增同一解析器及既有 Lezer 共享依赖引用；未安装其他业务依赖。未提交、推送或部署。
+
 ## 2026-11-25：GitHub 同步与首次公开发布
 
 - 本轮实际运行全量单元测试：11 个文件、110 项通过；`pnpm --filter code-meter-web type-check` 通过。

@@ -230,7 +230,7 @@ it('leaves a completed result exportable when history cannot be saved', async ()
   expect(wrapper.get('.main-count strong').text()).toBe('1')
   await wrapper.get('.export-actions').findAll('button')[1]!.trigger('click')
   const report = JSON.parse(String(vi.mocked(downloadFile).mock.calls[0]?.[1]))
-  expect(report.schemaVersion).toBe(2)
+  expect(report.schemaVersion).toBe(3)
   expect(report.snapshot.totals.code).toBe(1)
   expect(repository.snapshots).toHaveLength(0)
 })
@@ -383,6 +383,7 @@ it('shows the new language summary and exports Excel from the displayed snapshot
     '代码行数',
     '空行数',
     '注释行数',
+    '函数个数',
     '最大值',
     '最小值',
     '均值',
@@ -394,7 +395,7 @@ it('shows the new language summary and exports Excel from the displayed snapshot
       .findAll('tbody tr')[0]!
       .findAll('td')
       .map((cell) => cell.text()),
-  ).toEqual(['1', '2', '0', '0', '2', '2', '2', '2'])
+  ).toEqual(['1', '2', '0', '0', '1', '2', '2', '2', '2'])
   await wrapper.get('.export-actions').findAll('button')[2]!.trigger('click')
   await flushPromises()
   expect(snapshotXlsx).toHaveBeenCalledOnce()
@@ -490,10 +491,10 @@ it('scans all three new text languages, retains history and exports unknown func
     const latest = repository.snapshots[0]!
     expect(latest.files[0]?.language).toBe(language)
     expect(latest.files[0]?.path).toBe('snippet.' + extension)
-    expect(latest.files[0]?.functionCount).toBeNull()
+    expect(latest.files[0]?.functionCount).toBe(language === 'java' ? 0 : null)
     expect(wrapper.get('.main-count strong').text()).toBe(String(code))
     expect(wrapper.get('.language-list').text()).toContain(name)
-    expect(wrapper.get('.report-summary tbody tr').findAll('td')).toHaveLength(8)
+    expect(wrapper.get('.report-summary tbody tr').findAll('td')).toHaveLength(9)
   }
   // Exports are also derived from the real result, not a language-specific UI branch.
   const jsonButton = wrapper.findAll('button').find((button) => button.text() === '导出 JSON ↗')!
@@ -506,7 +507,7 @@ it('scans all three new text languages, retains history and exports unknown func
   expect(wrapper.findAll('.history-row')).toHaveLength(3)
 })
 
-it('hides function fields but displays located parser warnings and preserves exported data', async () => {
+it('shows function fields and located parser warnings and preserves exported data', async () => {
   const files = [
     analyzeText({ path: 'function-only.py', text: 'def broken(:\n    pass' }),
     analyzeText({ path: 'line-warning.py', text: 'print("unfinished' }),
@@ -516,20 +517,20 @@ it('hides function fields but displays located parser warnings and preserves exp
   const snapshot = { ...oldSnapshot(), ...summarize(files), id: 'visibility' }
   repository.snapshots = [snapshot]
   await open()
-  expect(files[0]!.warnings.join('')).toContain('函数个数暂不可用')
+  expect(files[0]!.functionIncomplete).toBe(true)
   expect(files[3]!.functionCount).toBe(1)
-  expect(wrapper.get('.workspace-page').text()).not.toContain('函数')
-  expect(wrapper.get('.report-summary thead').findAll('th')).toHaveLength(9)
-  expect(wrapper.get('.files-section > .table-scroll thead').findAll('th')).toHaveLength(7)
-  expect(wrapper.get('.table-controls').text()).toContain('仅看异常 / 跳过（2）')
+  expect(wrapper.get('.workspace-page').text()).toContain('函数个数')
+  expect(wrapper.get('.report-summary thead').findAll('th')).toHaveLength(10)
+  expect(wrapper.get('.files-section > .table-scroll thead').findAll('th')).toHaveLength(8)
+  expect(wrapper.get('.table-controls').text()).toContain('仅看异常 / 跳过（3）')
   expect(wrapper.get('.files-section').text()).toContain('字符串可能未闭合')
   expect(files[2]!.warnings.join('')).toContain('当前解析器未完整识别此处语法')
   expect(wrapper.get('.files-section').text()).toContain('第 1 行第')
   expect(wrapper.get('.files-section').text()).toContain('不能据此判定源码错误')
   await wrapper.get('.table-controls input[type="checkbox"]').setValue(true)
   const rows = wrapper.findAll('.files-section > .table-scroll tbody tr')
-  expect(rows).toHaveLength(2)
-  expect(rows[0]!.get('.file-path').text()).toBe('line-warning.py')
+  expect(rows).toHaveLength(3)
+  expect(rows[0]!.get('.file-path').text()).toBe('function-only.py')
   await wrapper
     .findAll('button')
     .find((button) => button.text() === '导出 JSON ↗')!
@@ -540,11 +541,59 @@ it('hides function fields but displays located parser warnings and preserves exp
   expect(exported.snapshot.files[2].warnings).toEqual(files[2]!.warnings)
   expect(exported.snapshot.files[3].functionCount).toBe(1)
   expect(snapshot.files[0]!.warnings).toEqual(files[0]!.warnings)
+  const reportSwitch = wrapper.get('[aria-label="代码行分布方式"]')
+  await reportSwitch.findAll('button')[1]!.trigger('click')
+  await flushPromises()
+  expect(reportSwitch.findAll('button')[1]!.attributes('aria-pressed')).toBe('true')
+  expect(wrapper.get('.report-summary .micro').text()).toContain('按各函数的有效代码行')
   await navigate('项目介绍')
-  expect(wrapper.get('.introduction-article').text()).not.toContain('函数')
+  expect(wrapper.get('.introduction-article h2').text()).toBe('功能介绍')
   await wrapper.get('a[href="#design"]').trigger('click')
   expect(wrapper.get('.introduction-article h2').text()).toBe('设计思路')
-  expect(wrapper.get('.introduction-article').text()).not.toContain('函数')
+  expect(wrapper.get('.introduction-article').text()).toContain('lambda')
+  expect(wrapper.get('.introduction-article').text()).toContain('可识别范围')
+  expect(wrapper.get('.introduction-article').text()).toContain('随快照保存')
+  expect(wrapper.get('.introduction-article').text()).toContain('JavaScript 与 TypeScript 不提供')
+})
+
+it('shows four supported function counts, partial coverage and missing old snapshot sizes', async () => {
+  const files = [
+    ['a.c', 'void f(){}'],
+    ['a.cpp', 'void f(){}'],
+    ['a.py', 'def f():\n pass'],
+    ['A.java', 'class A { void f(){} }'],
+    ['a.js', 'function f(){}'],
+    ['a.ts', 'function f(): void {}'],
+  ].map(([path, text]) => analyzeText({ path: path!, text: text! }))
+  repository.snapshots = [{ ...oldSnapshot(), ...summarize(files) }]
+  await open()
+  const table = wrapper.get('.report-summary table')
+  const rows = table.findAll('tbody tr')
+  expect(rows.slice(0, 4).map((row) => row.findAll('td')[4]!.text())).toEqual(['1', '1', '1', '1'])
+  expect(rows.slice(4, 6).map((row) => row.findAll('td')[4]!.text())).toEqual(['—', '—'])
+  expect(rows[6]!.findAll('td')[4]!.text()).toMatch(/4.*基于 4\/6/s)
+  const headings = table.findAll('thead th').map((cell) => cell.text())
+  await wrapper.get('[aria-label="代码行分布方式"]').findAll('button')[1]!.trigger('click')
+  expect(table.findAll('thead th').map((cell) => cell.text())).toEqual(headings)
+  expect(wrapper.get('.report-summary .micro').text()).toContain('按各函数')
+
+  wrapper.unmount()
+  for (const file of files) {
+    delete file.functionCount
+    delete file.functionLineSizes
+    delete file.functionRuleVersion
+    delete file.functionIncomplete
+  }
+  repository.snapshots = [{ ...oldSnapshot(), ...summarize(files) }]
+  await open()
+  await wrapper.get('[aria-label="代码行分布方式"]').findAll('button')[1]!.trigger('click')
+  for (const row of wrapper.findAll('.report-summary tbody tr'))
+    expect(
+      row
+        .findAll('td')
+        .slice(4)
+        .map((cell) => cell.text()),
+    ).toEqual(['—', '—', '—', '—', '—'])
 })
 
 it('previews supported candidates, selects GBK, filters stubs and restores their history', async () => {

@@ -49,12 +49,12 @@ it('counts C++ methods, constructors, destructors and operators without counting
   expect(file.warnings).toEqual([])
 })
 
-it('retains line counts but leaves functions unavailable on parser recovery; empty source has zero functions', () => {
+it('retains recognizable functions on parser recovery; empty source has zero functions', () => {
   const broken = analyzeText({ path: 'bad.py', text: 'def broken(:\n    pass\n' })
   expect(broken.status).toBe('ok')
   expect(broken.counts.code).toBe(2)
-  expect(broken.functionCount).toBeNull()
-  expect(broken.warnings.join()).toContain('函数个数暂不可用')
+  expect(broken.functionCount).toBe(1)
+  expect(broken.functionIncomplete).toBe(true)
   expect(analyzeText({ path: 'empty.py', text: '' }).functionCount).toBe(0)
 })
 
@@ -82,6 +82,11 @@ it('computes per-file distributions by language and recomputes the project distr
     blankLines: 0,
     commentLines: 0,
     functionCount: 0,
+    functionLanguageCoverage: { counted: 1, total: 1 },
+    maxFunctionLines: null,
+    minFunctionLines: null,
+    meanFunctionLines: null,
+    medianFunctionLines: null,
     maxCodeLines: 5,
     minCodeLines: 1,
     meanCodeLines: 3,
@@ -89,6 +94,7 @@ it('computes per-file distributions by language and recomputes the project distr
   })
   expect(report.total.sourceFiles).toBe(3)
   expect(report.total.functionCount).toBe(1)
+  expect(report.total.functionLanguageCoverage).toEqual({ counted: 2, total: 2 })
   expect(report.total.meanCodeLines).toBe(8 / 3)
   expect(report.total.medianCodeLines).toBe(2)
   expect(report.total.maxCodeLines).toBe(5)
@@ -101,13 +107,72 @@ it('includes empty files as distribution samples and keeps old snapshot function
   delete old.functionRuleVersion
   const report = buildReport(summarize([empty, old]))
   expect(report.total.sourceFiles).toBe(2)
-  expect(report.total.functionCount).toBeNull()
+  expect(report.total.functionCount).toBe(0)
+  expect(report.total.functionLanguageCoverage).toEqual({ counted: 1, total: 1 })
   expect(report.total.minCodeLines).toBe(0)
   expect(report.total.medianCodeLines).toBe(1)
   expect(report.total.meanCodeLines).toBe(1)
   const noFiles = buildReport(summarize([])).total
   expect(noFiles.maxCodeLines).toBeNull()
   expect(noFiles.meanCodeLines).toBeNull()
+})
+
+it('aggregates known function sizes across files and reports language coverage', () => {
+  const first = analyzeText({ path: 'a.py', text: 'def a():\n pass\ndef b():\n pass\n' })
+  const second = analyzeText({ path: 'b.c', text: 'void c(){\n int x;\n}\n' })
+  first.functionLineSizes = [1, 2]
+  first.functionCount = 2
+  second.functionLineSizes = [3, 4, 5]
+  second.functionCount = 3
+  const report = buildReport(summarize([first, second])).total
+  expect(report.functionCount).toBe(5)
+  expect(report.functionLanguageCoverage).toEqual({ counted: 2, total: 2 })
+  expect([
+    report.maxFunctionLines,
+    report.minFunctionLines,
+    report.meanFunctionLines,
+    report.medianFunctionLines,
+  ]).toEqual([5, 1, 3, 3])
+})
+
+it('computes an even function-size median and leaves missing size snapshots unknown', () => {
+  const first = analyzeText({ path: 'a.c', text: 'void a(){} void b(){}' })
+  first.functionLineSizes = [2, 8]
+  const second = analyzeText({ path: 'b.c', text: 'void c(){}' })
+  delete second.functionLineSizes
+  const report = buildReport(summarize([first, second])).byLanguage[0]!
+  expect(report.medianFunctionLines).toBe(5)
+})
+
+it('sums supported function counts without treating JavaScript as zero', () => {
+  const report = buildReport(
+    summarize([
+      analyzeText({ path: 'a.c', text: 'void a(){} void b(){}' }),
+      analyzeText({ path: 'a.js', text: 'function c(){}' }),
+    ]),
+  )
+  expect(report.total.functionCount).toBe(2)
+  expect(report.total.functionLanguageCoverage).toEqual({ counted: 1, total: 2 })
+  expect(report.byLanguage.find((row) => row.language === 'JavaScript')!.functionCount).toBeNull()
+})
+
+it('keeps a single function median and all missing size metrics distinct', () => {
+  const file = analyzeText({ path: 'a.c', text: 'void f(){\n int x;\n}' })
+  expect(buildReport(summarize([file])).total.medianFunctionLines).toBe(3)
+  delete file.functionLineSizes
+  const report = buildReport(summarize([file])).total
+  expect([
+    report.maxFunctionLines,
+    report.minFunctionLines,
+    report.meanFunctionLines,
+    report.medianFunctionLines,
+  ]).toEqual([null, null, null, null])
+  expect([
+    report.maxCodeLines,
+    report.minCodeLines,
+    report.meanCodeLines,
+    report.medianCodeLines,
+  ]).toEqual([3, 3, 3, 3])
 })
 
 function snapshot(code: number, time: string): Snapshot {

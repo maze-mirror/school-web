@@ -7,6 +7,11 @@ export interface ReportRow {
   blankLines: number
   commentLines: number
   functionCount: number | null
+  functionLanguageCoverage?: { counted: number; total: number }
+  maxFunctionLines: number | null
+  minFunctionLines: number | null
+  meanFunctionLines: number | null
+  medianFunctionLines: number | null
   maxCodeLines: number | null
   minCodeLines: number | null
   meanCodeLines: number | null
@@ -26,21 +31,46 @@ export const REPORT_COLUMNS = [
   { key: 'medianCodeLines', label: '中位数' },
 ] as const
 
+export const REPORT_COLUMNS_FUNCTIONS = [
+  { key: 'maxFunctionLines', label: '最大值' },
+  { key: 'minFunctionLines', label: '最小值' },
+  { key: 'meanFunctionLines', label: '均值' },
+  { key: 'medianFunctionLines', label: '中位数' },
+] as const
+export type ReportColumnKey =
+  (typeof REPORT_COLUMNS)[number]['key'] | (typeof REPORT_COLUMNS_FUNCTIONS)[number]['key']
+
 function summarizeRow(language: string, files: FileStat[]): ReportRow {
   const lengths = files.map((file) => file.counts.code).sort((a, b) => a - b)
   const count = lengths.length
   const codeLines = lengths.reduce((sum, length) => sum + length, 0)
   const middle = Math.floor(count / 2)
+  const counted = files.filter((file) => typeof file.functionCount === 'number')
+  const sizes = files.flatMap((file) => file.functionLineSizes ?? []).sort((a, b) => a - b)
+  const functionMiddle = Math.floor(sizes.length / 2)
   return {
     language,
     sourceFiles: count,
     codeLines,
     blankLines: files.reduce((sum, file) => sum + file.counts.blank, 0),
     commentLines: files.reduce((sum, file) => sum + file.counts.commentOnly, 0),
-    functionCount:
-      count && files.every((file) => typeof file.functionCount === 'number')
-        ? files.reduce((sum, file) => sum + file.functionCount!, 0)
-        : null,
+    functionCount: counted.length
+      ? counted.reduce((sum, file) => sum + file.functionCount!, 0)
+      : null,
+    functionLanguageCoverage: {
+      counted: new Set(counted.map((file) => file.language)).size,
+      total: new Set(files.map((file) => file.language)).size,
+    },
+    maxFunctionLines: sizes.at(-1) ?? null,
+    minFunctionLines: sizes[0] ?? null,
+    meanFunctionLines: sizes.length
+      ? sizes.reduce((sum, size) => sum + size, 0) / sizes.length
+      : null,
+    medianFunctionLines: sizes.length
+      ? sizes.length % 2
+        ? sizes[functionMiddle]!
+        : (sizes[functionMiddle - 1]! + sizes[functionMiddle]!) / 2
+      : null,
     maxCodeLines: lengths.at(-1) ?? null,
     minCodeLines: lengths[0] ?? null,
     meanCodeLines: count ? codeLines / count : null,
